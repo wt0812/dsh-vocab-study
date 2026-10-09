@@ -1,0 +1,20 @@
+# Python 构建脚本产生的缓存
+__pycache__/
+*.py[cod]
+*.pyo
+
+# 临时 / 调试产物
+*.tmp
+*.log
+*.bak
+*.orig
+
+# 安装器的备份（本机状态，不该进仓库）
+.dsh-install-backup/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

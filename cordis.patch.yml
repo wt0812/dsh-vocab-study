@@ -1,0 +1,10 @@
+# dsh-vocab-study bundle patch
+#
+# 一行 host 条目。行名从 profile 自己的 node_modules 里解析 ——
+# 也就是 `dsh plugin --profile <profile> add <本目录>` 把本包装进去的那个位置。
+#
+# 本插件是纯客户端 UI 插件：数据只存在用户浏览器里，不上报、不联网。
+# 这一行存在的意义是让 Loader 认领本包；它不注册任何 Host 服务。
+- insert:
+    - id: vocab-study
+      name: dsh-vocab-study

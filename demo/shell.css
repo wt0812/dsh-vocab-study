@@ -1,0 +1,82 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   demo/shell.css —— 演示外壳样式（只属于 demo，绝不进插件产物）
+
+   为什么单独一个文件：
+   这些规则里有全局的 `body` 选择器。插件产物是注入到 DSH 真实页面里的，
+   一旦带上 `body { margin: 0; background: ... }`，就会覆盖宿主自己的
+   body 样式，把 DSH 界面搞坏（实测：界面上很多按钮失效）。
+   所以外壳样式必须物理隔离在插件样式表之外。
+   tools/build-plugin.py 只读 ui/styles.css；tools/build.py 读
+   ui/styles.css + demo/shell.css 拼给 demo 用。
+   ═══════════════════════════════════════════════════════════════════════ */
+
+body { margin: 0; background: #14120F; }
+.dsh-demo {
+  height: 100vh; display: flex; flex-direction: column;
+  background: #14120F; color: #EDE6DB;
+  font-family: Georgia, "Times New Roman", serif;
+}
+.dsh-top {
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+  border-bottom: 1px solid rgba(237, 230, 219, .09); font-size: 12.5px;
+}
+.dsh-top .logo { font-weight: 700; letter-spacing: .02em; }
+.dsh-top .dim { color: #8A8076; }
+.dsh-top .right { margin-left: auto; display: flex; gap: 7px; }
+.dsh-top button {
+  appearance: none; border: 1px solid rgba(237, 230, 219, .14); background: transparent;
+  color: #B3A99C; border-radius: 999px; padding: 3px 9px; font-size: 11px;
+  cursor: pointer; font-family: inherit;
+}
+.dsh-top button:hover { color: #EDE6DB; background: rgba(237, 230, 219, .07); }
+.dsh-main { flex: 1 1 auto; min-height: 0; display: flex; }
+.dsh-chat { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.dsh-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 20px 8px; }
+.dsh-msg { max-width: 660px; margin: 0 0 16px; font-size: 13.5px; line-height: 1.7; }
+.dsh-msg .who { font-size: 11px; color: #8A8076; margin-bottom: 3px; letter-spacing: .04em; text-transform: uppercase; }
+.dsh-msg.user .body { background: rgba(237, 230, 219, .06); border-radius: 10px; padding: 8px 11px; display: inline-block; }
+.dsh-msg .body code { font-family: Consolas, monospace; font-size: 12px; background: rgba(237, 230, 219, .08); padding: 1px 4px; border-radius: 4px; }
+.dsh-msg .stream::after { content: '▍'; color: #7FBFA8; animation: dsh-blink 900ms steps(2) infinite; }
+@keyframes dsh-blink { 50% { opacity: 0; } }
+.dsh-composer {
+  position: relative; padding: 10px 14px 14px; border-top: 1px solid rgba(237, 230, 219, .09);
+}
+.dsh-input {
+  display: flex; align-items: flex-end; gap: 8px;
+  border: 1px solid rgba(237, 230, 219, .15); border-radius: 14px;
+  background: #1C1916; padding: 8px 10px;
+}
+.dsh-input textarea {
+  flex: 1 1 auto; min-width: 0; resize: none; border: 0; background: transparent;
+  color: #EDE6DB; font-family: inherit; font-size: 13.5px; line-height: 1.6;
+  outline: none; padding: 5px 2px; height: 26px;
+}
+.dsh-input textarea::placeholder { color: #6E655B; }
+.dsh-toolbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.dsh-seat {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px;
+  border: 1px solid rgba(237, 230, 219, .13); border-radius: 999px;
+  background: #1C1916; color: #B3A99C; font-size: 12px; font-family: inherit;
+  cursor: pointer; white-space: nowrap; flex: 0 0 auto;
+}
+.dsh-seat:hover { color: #EDE6DB; }
+.dsh-seat-group-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.dsh-send {
+  width: 30px; height: 30px; border-radius: 9px; border: 0; background: #E8E0D4;
+  color: #211E1B; cursor: pointer; font-size: 14px; flex: 0 0 auto;
+}
+.dsh-side {
+  flex: 0 0 auto; width: 0; overflow: hidden; border-left: 1px solid rgba(237, 230, 219, .09);
+  background: #191613; display: flex; flex-direction: column; transition: width .18s ease;
+}
+.dsh-side.open { width: 340px; }
+.dsh-side .tabs {
+  display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(237, 230, 219, .09);
+  font-size: 11.5px; color: #8A8076; flex: 0 0 auto;
+}
+.dsh-side .tabs span { padding: 3px 8px; border-radius: 6px; }
+.dsh-side .tabs span[data-on="1"] { background: rgba(237, 230, 219, .09); color: #EDE6DB; }
+.dsh-side .pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.dsh-hint {
+  font-size: 11.5px; color: #6E655B; padding: 8px 20px 0;
+}

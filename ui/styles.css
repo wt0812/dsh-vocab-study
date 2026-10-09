@@ -1,0 +1,529 @@
+/* vocab-study / ui / styles.css
+ * 温暖手账风（规格 §14.4）：
+ *   底 → 米白（纸张底 + 极轻纸纹） · 正文 → 墨色
+ *   强调 A → 珊瑚 #FF6B5A（只用于非文字内容） · 强调 B → 青玉 #1F9D8F
+ *   层级靠留白与字重，不靠色块与边框线 —— 别做成后台管理面板
+ * 所有 token 都带 --vs- 前缀，避免跟 DSH 自己的样式表撞名。
+ */
+
+.vs, .vs * { box-sizing: border-box; }
+
+.vs {
+  --vs-radius: 10px;
+  --vs-radius-lg: 14px;
+  /* 阅读宽度上限：面板被开在宽标签页里时，内容收成一条并居中。
+     窄侧栏（340px）里这个值比可用宽度大，规则等于不存在。 */
+  --vs-readw: 560px;
+  --vs-serif: "Iowan Old Style", "Source Han Serif SC", "Songti SC", "Noto Serif CJK SC", Georgia, "Times New Roman", serif;
+  --vs-mono: "SF Mono", ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --vs-coral: #FF6B5A;      /* 只用于非文字内容 */
+  --vs-coral-text: #C24432; /* 文字用深一档，保证对比度 ≥ 4.5:1 */
+  --vs-jade: #1F9D8F;
+  --vs-jade-text: #157F73;
+  --vs-warm: #D9A23B;
+  --vs-warm-text: #8A6420;
+  --vs-away: #7C8A9A;
+  --vs-away-text: #5A6774;
+  font-family: var(--vs-serif);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 亮色：米白纸张 ─────────────────────────────────── */
+.vs[data-theme="light"] {
+  --vs-paper: #FBF7F0;
+  --vs-paper-2: #F4EEE4;
+  --vs-ink: #2E2A26;
+  --vs-ink-soft: #6B6259;
+  --vs-ink-faint: #9A9089;
+  --vs-line: rgba(46, 42, 38, .10);
+  --vs-line-soft: rgba(46, 42, 38, .06);
+  --vs-shadow: 0 10px 30px rgba(60, 48, 34, .13), 0 2px 6px rgba(60, 48, 34, .07);
+  --vs-hover: rgba(46, 42, 38, .045);
+  --vs-chip: rgba(46, 42, 38, .05);
+  color-scheme: light;
+}
+
+/* ── 暗色：纸张在夜里 ────────────────────────────────── */
+.vs[data-theme="dark"] {
+  --vs-paper: #211E1B;
+  --vs-paper-2: #2A2622;
+  --vs-ink: #EDE6DB;
+  --vs-ink-soft: #B3A99C;
+  --vs-ink-faint: #7E756A;
+  --vs-line: rgba(237, 230, 219, .12);
+  --vs-line-soft: rgba(237, 230, 219, .07);
+  --vs-shadow: 0 14px 36px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .35);
+  --vs-hover: rgba(237, 230, 219, .06);
+  --vs-chip: rgba(237, 230, 219, .07);
+  --vs-coral-text: #FF8E80;
+  --vs-jade-text: #5ED0BE;
+  --vs-warm-text: #E8BE6A;
+  --vs-away-text: #A5B2BE;
+  color-scheme: dark;
+}
+
+/* 纸张底纹：极轻，几乎看不见 —— 手账的底线 */
+.vs-panel, .vs-card-floating {
+  background-image:
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, .035) 0 1px, transparent 1px),
+    radial-gradient(circle at 72% 68%, rgba(120, 100, 80, .035) 0 1px, transparent 1px);
+  background-size: 26px 26px, 34px 34px;
+}
+
+/* ═══════════ 胶囊 ═══════════ */
+.vs-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  margin: 0 2px;
+  border: 1px solid var(--vs-line);
+  border-radius: 999px;
+  background: var(--vs-paper-2);
+  color: var(--vs-ink);
+  font-family: var(--vs-serif);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .12s ease;
+  position: relative;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.vs-capsule:hover { background: var(--vs-chip); border-color: rgba(255, 107, 90, .35); }
+.vs-capsule:active { transform: scale(.97); }
+.vs-capsule:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 2px; }
+.vs-capsule[data-tone="streak"] { border-color: rgba(255, 107, 90, .45); }
+.vs-capsule[data-tone="due"] { border-color: rgba(217, 162, 59, .45); }
+.vs-capsule[data-tone="done"] { border-color: rgba(31, 157, 143, .45); }
+.vs-capsule[data-tone="away"] { border-color: var(--vs-line); color: var(--vs-ink-soft); }
+.vs-capsule .vs-cap-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--vs-coral); flex: 0 0 auto;
+}
+.vs-capsule[data-tone="fresh"] .vs-cap-dot { background: var(--vs-jade); }
+.vs-capsule[data-tone="due"] .vs-cap-dot { background: var(--vs-warm); }
+.vs-capsule[data-tone="done"] .vs-cap-dot { background: var(--vs-jade); }
+.vs-capsule[data-tone="away"] .vs-cap-dot { background: var(--vs-away); }
+/* 达成时的一次轻微涟漪（§3.3）；reduced-motion 下不跑 */
+.vs-capsule[data-ripple="1"] .vs-cap-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 157, 143, .6);
+  animation: vs-ripple 700ms ease-out 1;
+}
+@keyframes vs-ripple {
+  from { transform: scale(.96); opacity: .8; }
+  to { transform: scale(1.12); opacity: 0; }
+}
+
+/* ═══════════ 宿主容器 ═══════════ */
+/*
+ * ⚠️ 这两条是「面板只画上半截、下面一大片空」的真凶，别删。
+ *
+ * `.vs-panel.docked` 用的是 `flex: 1 1 auto` —— **它需要父容器是 flex 才能被撑满**。
+ * 插件形态里面板挂在 React 渲染的 .vs-pane-host 里，而那个 div 之前**一条样式都没有**：
+ * 普通 block、没有高度 → 面板只有内容那么高 → 下半个标签页全是空的。
+ *
+ * 正确写法（抄 demo/shell.css 的 .dsh-side .pane，那是已经在用的形状）：
+ * flex 列 + min-height:0 + 让子项自己滚。
+ */
+.vs-pane-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+/* 输入框右侧的座位：只是给傀儡一个落脚点，不该改变那一行的布局 */
+.vs-capsule-seat { display: inline-flex; align-items: center; flex: 0 0 auto; }
+
+/* ═══════════ 面板 ═══════════ */
+.vs-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--vs-ink);
+  font-family: var(--vs-serif);
+  overflow: hidden;
+  position: relative;
+}
+.vs-panel.floating {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 10px);
+  max-height: min(64vh, 560px);
+  background: var(--vs-paper);
+  border: 1px solid var(--vs-line);
+  border-radius: var(--vs-radius-lg);
+  box-shadow: var(--vs-shadow);
+  z-index: 40;
+}
+.vs-panel.docked {
+  flex: 1 1 auto;
+  /* min-height:0 必须有：没有它 flex 列里的子项不肯缩到内容以下，滚动就会失效 */
+  min-height: 0;
+  background: var(--vs-paper);
+  /* 铺满宿主容器：下面的 padding 只留一点点呼吸感，不再让面板缩成一条 */
+  padding: 10px 12px 8px;
+  overflow: hidden;
+}
+/*
+ * 停靠形态：正文吃掉剩余高度，底栏自然被推到面板底部。
+ * 注意底栏**不要**用 margin-top:auto —— 那会让它和卡片抢同一段空白，
+ * 卡片就居中不了了（踩过）。靠 .vs-body 的 flex:1 推下去就够。
+ */
+.vs-panel.docked .vs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.vs-panel.docked.floating { padding: 12px 14px 10px; }
+
+/* 顶栏 */
+.vs-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--vs-line-soft);
+  flex: 0 0 auto;
+}
+.vs-panel.docked .vs-head { padding: 2px 0 8px; }
+.vs-title { font-size: 13px; font-weight: 600; letter-spacing: .01em; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-iconbtn {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: var(--vs-ink-faint); font-size: 13px; line-height: 1;
+  width: 24px; height: 24px; border-radius: 7px; display: inline-flex;
+  align-items: center; justify-content: center; flex: 0 0 auto;
+  font-family: var(--vs-serif);
+}
+.vs-iconbtn:hover { background: var(--vs-hover); color: var(--vs-ink); }
+.vs-iconbtn:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+
+/* 一行灰字（离线模式 / 只读 / 另一个窗口正在学）—— 不解释（§14.5） */
+.vs-banner {
+  font-size: 11px; color: var(--vs-ink-faint);
+  padding: 5px 12px; background: var(--vs-line-soft);
+  flex: 0 0 auto;
+}
+.vs-panel.docked .vs-banner { padding: 5px 0; background: transparent; }
+
+/* 页签 */
+.vs-tabs { display: flex; gap: 2px; padding: 8px 8px 0; flex: 0 0 auto; }
+.vs-panel.docked .vs-tabs { padding: 8px 0 0; }
+.vs-tab {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font-family: var(--vs-serif); font-size: 12px; color: var(--vs-ink-faint);
+  padding: 5px 9px; border-radius: 7px;
+}
+.vs-tab:hover { background: var(--vs-hover); color: var(--vs-ink-soft); }
+.vs-tab[aria-selected="true"] { background: var(--vs-chip); color: var(--vs-ink); font-weight: 600; }
+.vs-tab:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+
+/* 主体 */
+.vs-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 12px 4px; }
+.vs-panel.docked .vs-body { padding: 8px 0 4px; }
+.vs-body::-webkit-scrollbar { width: 8px; }
+.vs-body::-webkit-scrollbar-thumb { background: var(--vs-line); border-radius: 8px; }
+
+/* 队列顶部一句话解释（§6.4）—— 只给一句话，不给数字 */
+.vs-headline {
+  font-size: 12px; color: var(--vs-ink-soft);
+  padding: 2px 2px 10px;
+}
+.vs-headline b { font-weight: 600; color: var(--vs-coral-text); }
+
+/*
+ * 停靠形态的正文排布（这是「评分按钮悬在半空、下面半屏黑」的修法）。
+ *
+ * 三个失败版本，别再走回去：
+ *   1. 什么都不做：卡片只有内容高，下半个标签页全空；
+ *   2. 卡片 flex:1 拉满：评分按钮被 margin-top:auto 推到最底，
+ *      词到按钮之间空近 400px，比原来还空；
+ *   3. 卡片只加 max-height、内容仍用 margin:auto 撑开：
+ *      徽章贴上边、按钮贴下边，中间约 180px 悬空，
+ *      看起来"内容浮在面板中间"，上下都不透气。
+ *
+ * 正确做法：把卡片高度**收到内容附近**（max-height 给个上限），
+ * 再让卡片整体在可用高度里垂直居中。这样内容聚成一块，
+ * 空白平均分到上下两边，读起来是"留白"而不是"塌了"。
+ */
+.vs-panel.docked .vs-body { display: flex; flex-direction: column; }
+/*
+ * 宽面板时把内容收成一条并居中。
+ *
+ * 为什么需要：这个面板原本是按 340px 宽的右侧栏设计的（demo 里 .dsh-side.open 就是 340px）。
+ * 但宿主也能把它开在主内容区 —— 那时候标签页宽 800px+，内容还是原来的宽度、
+ * 又全部左对齐，右边就空出一大片，看起来像"没做完"。
+ * 340px 的窄侧栏里，下面的 max-width 比可用宽度还大，**这条规则等于不存在**；
+ * 只有面板被拉宽时它才起作用。
+ */
+/*
+ * ⚠️ 顺序有讲究：下面两条都作用于 .vs-card，后者会覆盖前者的简写属性。
+ *   · 上面的 `margin-left/right: auto` 负责**水平**居中；
+ *   · 卡片自己的 `margin: auto 0` 会把左右也写成 0 → **水平居中静默失效**。
+ *     这正是"内容明明限宽了却还贴在左边"的原因（实测 card offsetLeft=12）。
+ * 所以卡片里的 margin 必须**只写上下**，用 `margin-top/bottom`，
+ * 不要用 `margin` 简写，否则又把左右清零。
+ */
+.vs-panel.docked .vs-body > * { width: 100%; max-width: var(--vs-readw); margin-left: auto; margin-right: auto; }
+.vs-panel.docked .vs-card {
+  display: flex;
+  flex-direction: column;
+  /* 内容高度 + 一点余量；超长内容（词义/例句展开后）仍能滚动 */
+  max-height: min(460px, 100%);
+  margin-top: auto; /* 上下平分剩余空间 → 整块垂直居中 */
+  margin-bottom: auto;
+  min-height: 0;
+}
+/*
+ * 注意这里**不要**给 #vs-stage 或 .vs-actions 加 flex:1 / margin-top:auto：
+ * 那会把卡片内剩余空间全塞到中间或底部，又变成"内容被抻开"。
+ * 卡片高度已经收到内容附近了，内部按正常文档流排即可。
+ */
+
+/*
+ * 轴统一：标签栏、正文、底栏都要落在同一条左基准线上。
+ *
+ * 不加这几条的话：正文卡片限宽后居中（左基准 x≈175），
+ * 而标签栏和底栏仍然贴着面板两边（左基准 x≈35），
+ * 一个面板里出现两条不同的左对齐线，看着像三块东西拼起来的。
+ * 窄侧栏里 max-width 不起作用，这几条同样等于不存在。
+ */
+.vs-panel.docked .vs-tabs,
+.vs-panel.docked .vs-banner,
+.vs-panel.docked .vs-head,
+.vs-panel.docked .vs-foot {
+  width: 100%;
+  max-width: var(--vs-readw);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ═══════════ 词卡 ═══════════ */
+.vs-card {
+  border-radius: var(--vs-radius-lg);
+  padding: 4px 2px 0;
+  outline: none;
+}
+.vs-card:focus-visible { box-shadow: 0 0 0 2px rgba(31, 157, 143, .35); border-radius: var(--vs-radius); }
+
+.vs-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; min-height: 0; }
+.vs-badge {
+  font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 999px;
+  background: var(--vs-chip); color: var(--vs-ink-soft); white-space: nowrap;
+}
+.vs-badge[data-kind="new"] { color: var(--vs-jade-text); }
+.vs-badge[data-kind="wrong"] { color: var(--vs-coral-text); }
+.vs-badge[data-kind="personal"] { color: var(--vs-warm-text); }
+
+.vs-word {
+  font-size: 27px; font-weight: 600; letter-spacing: -.01em;
+  cursor: pointer; display: inline-flex; align-items: baseline; gap: 8px;
+  border: 0; background: transparent; padding: 0; color: inherit;
+  font-family: var(--vs-serif); text-align: left; line-height: 1.25;
+}
+.vs-word:hover { color: var(--vs-coral-text); }
+.vs-word:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 3px; border-radius: 6px; }
+.vs-word .vs-audio { font-size: 12px; opacity: .45; }
+
+.vs-ipa {
+  font-family: var(--vs-mono); font-size: 12.5px; color: var(--vs-ink-soft);
+  margin-top: 2px;
+}
+.vs-hint { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 8px; font-style: italic; }
+
+/* 自评按钮：固定在同一个位置，眼睛不用找，手指已经在那儿（§5.2） */
+.vs-ratings {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  margin: 14px 0 0;
+}
+.vs-rate {
+  appearance: none; cursor: pointer; font-family: var(--vs-serif);
+  border: 1px solid var(--vs-line); border-radius: var(--vs-radius);
+  background: var(--vs-paper-2); color: var(--vs-ink);
+  padding: 9px 4px; font-size: 12.5px; line-height: 1.2;
+  transition: background .12s ease, border-color .12s ease, transform .1s ease;
+}
+.vs-rate:hover { background: var(--vs-chip); }
+.vs-rate:active { transform: translateY(1px); }
+.vs-rate:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+.vs-rate[data-k="forgot"]:hover { border-color: rgba(255, 107, 90, .5); }
+.vs-rate[data-k="fuzzy"]:hover { border-color: rgba(217, 162, 59, .5); }
+.vs-rate[data-k="known"]:hover { border-color: rgba(31, 157, 143, .5); }
+.vs-rate kbd {
+  font-family: var(--vs-mono); font-size: 9.5px; opacity: .5;
+  margin-left: 3px;
+}
+
+/* 揭晓 */
+.vs-reveal { animation: vs-fade 120ms ease-out 1; }
+@keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
+.vs-rule { height: 1px; background: var(--vs-line-soft); margin: 12px 0 10px; }
+.vs-pos { font-size: 11px; color: var(--vs-ink-faint); margin-bottom: 2px; font-family: var(--vs-mono); }
+.vs-meaning { font-size: 16px; line-height: 1.5; }
+.vs-ex { margin-top: 10px; font-size: 13px; }
+.vs-ex .en { font-style: italic; }
+.vs-ex .zh { color: var(--vs-ink-soft); font-size: 12px; margin-top: 2px; }
+.vs-gray { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 10px; }
+.vs-gray button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: var(--vs-jade-text); font-family: var(--vs-serif); font-size: 11.5px; padding: 0;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+
+/* 折叠项：永不自动展开（§5.2） */
+.vs-folds { margin-top: 10px; border-top: 1px solid var(--vs-line-soft); }
+.vs-fold > summary {
+  cursor: pointer; font-size: 11.5px; color: var(--vs-ink-soft);
+  padding: 7px 0; list-style: none; display: flex; align-items: center; gap: 5px;
+}
+.vs-fold > summary::-webkit-details-marker { display: none; }
+.vs-fold > summary::before { content: '▸'; font-size: 9px; opacity: .6; }
+.vs-fold[open] > summary::before { content: '▾'; }
+.vs-fold .vs-foldbody { font-size: 12px; color: var(--vs-ink-soft); padding: 0 0 8px 14px; }
+.vs-fold .vs-foldbody ul { margin: 0; padding-left: 15px; }
+
+/* AI 增强区：空白 > 你点了才填（§5.2） */
+.vs-ai { margin-top: 10px; }
+.vs-ai-btn {
+  appearance: none; border: 1px dashed var(--vs-line); background: transparent;
+  cursor: pointer; font-family: var(--vs-serif); font-size: 11.5px;
+  color: var(--vs-jade-text); padding: 6px 10px; border-radius: 999px;
+}
+.vs-ai-btn:hover { background: var(--vs-hover); }
+.vs-ai-out { font-size: 12.5px; margin-top: 8px; padding: 9px 11px; border-radius: var(--vs-radius); background: var(--vs-chip); }
+.vs-ai-out .hook { font-weight: 600; }
+.vs-ai-out .ex { font-style: italic; color: var(--vs-ink-soft); margin-top: 4px; }
+/* 记忆钩子的一句话 + 它的来源标注（§9：用户能看到它凭什么这么说） */
+.vs-ai-line { font-weight: 600; line-height: 1.5; }
+.vs-ai-src {
+  margin-top: 3px; font-size: 11px; color: var(--vs-ink-faint);
+  letter-spacing: .02em;
+}
+.vs-ai-out[data-state="failed"] { color: var(--vs-coral-text); }
+.vs-ai-out[data-state="loading"] { color: var(--vs-ink-faint); }
+
+/* 揭晓后的行动区（下一张 / 撤销 / 其实我搞混了 / 这题有问题） */
+.vs-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; }
+.vs-btn {
+  appearance: none; cursor: pointer; font-family: var(--vs-serif); font-size: 12px;
+  border: 1px solid var(--vs-line); border-radius: 999px;
+  background: transparent; color: var(--vs-ink-soft); padding: 5px 11px;
+}
+.vs-btn:hover { background: var(--vs-hover); color: var(--vs-ink); }
+.vs-btn:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+.vs-btn.primary {
+  background: var(--vs-jade); border-color: var(--vs-jade); color: #fff; font-weight: 600;
+  padding: 6px 16px;
+}
+.vs-btn.primary:hover { filter: brightness(1.06); }
+.vs-btn.muted { border-color: transparent; font-size: 11px; color: var(--vs-ink-faint); }
+.vs-btn.muted:hover { color: var(--vs-ink-soft); }
+.vs-btn[disabled] { opacity: .35; cursor: default; }
+
+/* 辨词模式 */
+.vs-quiz-opts { display: grid; gap: 6px; margin-top: 14px; }
+.vs-quiz-opt {
+  appearance: none; cursor: pointer; text-align: left; font-family: var(--vs-serif);
+  border: 1px solid var(--vs-line); border-radius: var(--vs-radius);
+  background: var(--vs-paper-2); color: var(--vs-ink); padding: 9px 11px; font-size: 13px;
+}
+.vs-quiz-opt:hover { background: var(--vs-chip); }
+.vs-quiz-opt:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+.vs-quiz-opt[data-state="right"] { border-color: rgba(31, 157, 143, .55); background: rgba(31, 157, 143, .09); }
+.vs-quiz-opt[data-state="wrong"] { border-color: rgba(255, 107, 90, .55); background: rgba(255, 107, 90, .08); }
+.vs-quiz-opt .pos { font-family: var(--vs-mono); font-size: 10px; color: var(--vs-ink-faint); margin-right: 5px; }
+
+/* 答错反馈：并排两个词 + 一句人话，绝不出现红叉（§5.3） */
+.vs-pair { display: flex; gap: 8px; margin-top: 10px; }
+.vs-pair .side {
+  flex: 1 1 0; min-width: 0; padding: 9px 10px; border-radius: var(--vs-radius);
+  background: var(--vs-chip);
+}
+.vs-pair .side .w { font-size: 14px; font-weight: 600; }
+.vs-pair .side .m { font-size: 11.5px; color: var(--vs-ink-soft); margin-top: 2px; }
+.vs-pair .side .i { font-family: var(--vs-mono); font-size: 10.5px; color: var(--vs-ink-faint); }
+.vs-human { font-size: 12.5px; color: var(--vs-ink-soft); margin-top: 8px; line-height: 1.5; }
+
+/* 底部状态条 */
+.vs-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 10px; border-top: 1px solid var(--vs-line-soft);
+  font-family: var(--vs-mono); font-size: 11px; color: var(--vs-ink-faint);
+  flex: 0 0 auto;
+}
+.vs-panel.docked .vs-foot { padding: 8px 0 2px; }
+.vs-combo { color: var(--vs-coral-text); font-weight: 600; }
+.vs-combo[data-hot="0"] { color: var(--vs-ink-faint); font-weight: 400; }
+.vs-today { margin-left: auto; }
+.vs-bar { width: 46px; height: 4px; border-radius: 2px; background: var(--vs-line); overflow: hidden; }
+.vs-bar > i { display: block; height: 100%; background: var(--vs-coral); border-radius: 2px; transition: width .25s ease; }
+
+/* ═══════════ 进度页 ═══════════ */
+.vs-h2 { font-size: 12px; color: var(--vs-ink-faint); margin: 14px 0 6px; font-weight: 500; }
+.vs-h2:first-child { margin-top: 2px; }
+.vs-big { font-size: 30px; font-weight: 600; font-family: var(--vs-mono); letter-spacing: -.02em; }
+.vs-big small { font-size: 12px; font-family: var(--vs-serif); color: var(--vs-ink-soft); font-weight: 400; margin-left: 5px; }
+.vs-sub { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 2px; }
+.vs-curve { width: 100%; height: 86px; margin-top: 6px; }
+.vs-curve .axis { stroke: var(--vs-line); stroke-width: 1; }
+.vs-curve .sched { fill: none; stroke: var(--vs-jade); stroke-width: 2; }
+.vs-curve .passive { fill: none; stroke: var(--vs-away); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.vs-legend { display: flex; gap: 12px; font-size: 11px; color: var(--vs-ink-soft); margin-top: 4px; }
+.vs-legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 4px; }
+.vs-legend .s i { background: var(--vs-jade); }
+.vs-legend .p i { background: var(--vs-away); }
+.vs-heat { display: flex; gap: 3px; margin-top: 6px; overflow: hidden; }
+.vs-heat .col { display: flex; flex-direction: column; gap: 3px; }
+.vs-heat .cell { width: 9px; height: 9px; border-radius: 2px; background: var(--vs-line-soft); }
+.vs-heat .cell[data-l="1"] { background: rgba(31, 157, 143, .28); }
+.vs-heat .cell[data-l="2"] { background: rgba(31, 157, 143, .5); }
+.vs-heat .cell[data-l="3"] { background: rgba(31, 157, 143, .72); }
+.vs-heat .cell[data-l="4"] { background: var(--vs-jade); }
+.vs-empty { font-size: 12.5px; color: var(--vs-ink-faint); padding: 18px 2px; text-align: center; }
+.vs-list { display: flex; flex-direction: column; gap: 1px; }
+.vs-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 2px;
+  border-bottom: 1px solid var(--vs-line-soft); font-size: 13px;
+}
+.vs-row .w { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-row .m { color: var(--vs-ink-soft); font-size: 12px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-row .t { font-family: var(--vs-mono); font-size: 10.5px; color: var(--vs-ink-faint); flex: 0 0 auto; }
+.vs-report { background: var(--vs-chip); border-radius: var(--vs-radius); padding: 11px 12px; font-size: 12.5px; line-height: 1.7; }
+.vs-report .k { color: var(--vs-coral-text); font-family: var(--vs-mono); font-weight: 600; }
+
+/* ═══════════ 设置页 ═══════════ */
+.vs-field { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--vs-line-soft); font-size: 12.5px; }
+.vs-field > label { flex: 1 1 auto; min-width: 0; }
+.vs-field .note { display: block; font-size: 10.5px; color: var(--vs-ink-faint); margin-top: 1px; }
+.vs-select, .vs-input {
+  appearance: none; font-family: var(--vs-serif); font-size: 12px;
+  background: var(--vs-paper-2); color: var(--vs-ink);
+  border: 1px solid var(--vs-line); border-radius: 7px; padding: 4px 7px;
+  max-width: 132px;
+}
+.vs-input { width: 62px; font-family: var(--vs-mono); text-align: right; }
+.vs-select:focus-visible, .vs-input:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+
+/* 攻守天平（§6.5）：人话 + 后果实时预览 */
+.vs-scale { padding: 4px 0 2px; }
+.vs-scale .ends { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--vs-ink-soft); }
+.vs-scale input[type="range"] { width: 100%; accent-color: var(--vs-coral); margin: 7px 0 3px; }
+.vs-scale .preview { font-size: 11.5px; color: var(--vs-ink-faint); text-align: center; }
+
+/* ═══════════ 窄窗口降级（§2.4）═══ */
+.vs.vs-compact .vs-ex { display: none; }
+.vs.vs-compact .vs-meaning { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs.vs-tiny .vs-ipa,
+.vs.vs-tiny .vs-badges,
+.vs.vs-tiny .vs-hint,
+.vs.vs-tiny .vs-ex { display: none; }
+.vs.vs-tiny .vs-word { font-size: 20px; }
+.vs.vs-tiny .vs-meaning { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs.vs-tiny .vs-body { padding: 6px 8px 2px; }

@@ -1,0 +1,60 @@
+{
+  "name": "dsh-vocab-study",
+  "version": "0.1.0",
+  "description": "今日词汇 (Vocabulary Study) —— DSH 的背单词面板：一个胶囊 + 一个标签页，按记忆半衰期排期，离线可用，不催不指责。",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wt0812/dsh-vocab-study.git"
+  },
+  "homepage": "https://github.com/wt0812/dsh-vocab-study#readme",
+  "bugs": {
+    "url": "https://github.com/wt0812/dsh-vocab-study/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "screenshots.json",
+    "assets"
+  ],
+  "scripts": {
+    "build": "python tools/build.py && python tools/build-plugin.py",
+    "test": "node test/core.test.mjs && node test/plugin.test.mjs && node test/demo-boot.test.mjs && node test/client-activation.test.mjs && node test/bundle-audit.test.mjs && node test/mount.test.mjs"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "client-plugin",
+    "vocabulary",
+    "spaced-repetition",
+    "背单词"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.1"
+  }
+}

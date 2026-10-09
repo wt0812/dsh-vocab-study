@@ -1,0 +1,15 @@
+dsh-vocab-study 0.1.0：今日词汇面板
+
+DSH 的纯客户端 UI 插件：输入框右侧一颗胶囊，点开是背单词面板；
+侧边栏右 pane 一个「今日背单词」标签页（今日 / 进度 / 生词本 / 设置）。
+
+- 按记忆半衰期排期，离线可用
+- 数据只落在浏览器 localStorage，不联网、不注册 Host 服务
+- 面板只在用户点开时出现，不主动弹出
+
+清单按 DSH 官方 manifest 规范：
+- dsh.bundle.patch（安装为插件的硬条件）
+- dsh.client.platform = web + exports["./client"]
+- dsh.manifestVersion = 1
+
+lib/ 为已构建产物，git 安装无需构建步骤。
