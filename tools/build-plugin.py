@@ -53,7 +53,7 @@ CORE_EXPORTS = [
     ("Q", ["DAY_START_HOUR", "dayKey", "dayStartTs", "daysBetweenKeys", "priorDayKey",
            "containerSize", "comebackCopy", "buildDailyContainer", "explain", "badgesFor",
            "emptyState", "CHECKIN_RATIO", "isCheckedIn", "bumpStreak", "isPaused",
-           "effectiveBaseN", "TIER", "seededRandom", "seededShuffle"]),
+           "effectiveBaseN", "TIER", "seededRandom", "seededShuffle", "shouldBlockNew"]),
     ("G", ["COMBO_STEPS", "comboMult", "COMBO_FREEZE_MS", "newCombo", "stepCombo",
            "freezeCombo", "resumeCombo", "LEVELS", "levelFor", "expFor", "conqueredCount"]),
     ("B", ["BECKON", "TONE", "LONG_GONE_DAYS", "SOLID_DAYS", "beckonState",
@@ -485,6 +485,36 @@ def main():
         raise SystemExit(
             "[%s] CORE_EXPORTS 里登记了源码中不存在的符号（改名了？漏了？）：\n  %s"
             % (PKG, "\n  ".join(missing))
+        )
+
+    # ── 悬空命名空间前缀检查（2026-10-09，真实事故）────────────────
+    # rewrite_namespaces() 只替换**登记在 CORE_EXPORTS 里的**成员。
+    # 漏登记一个名字，`Q.shouldBlockNew(...)` 就会原样留在产物里；而摊平之后
+    # 根本没有 `Q` 这个对象 —— 一执行就是 ReferenceError，而且它发生在
+    # snapshotState() 里，也就是**渲染第一帧**：面板整个建不出来，标签页全黑。
+    #
+    # 上面那段 missing 检查抓不到它：那里查的是「清单里的符号在不在源码里」，
+    # 而这里错的是「源码用了清单里没有的符号」—— 方向正好相反。
+    #
+    # 事故经过：加了「再来 5 个新词」用到 shouldBlockNew，忘了登记，7 个测试
+    # 套件全绿（测试直接 import core/app.mjs，不经打包器），真机上黑屏。
+    ns_prefixes = sorted({key.split(".")[0] for key in ns_table})
+    dangling = []
+    for m in re.finditer(r"\b(%s)\.([A-Za-z_$][\w$]*)" % "|".join(ns_prefixes), body):
+        full = m.group(1) + "." + m.group(2)
+        if full not in ns_table:
+            line_no = body[: m.start()].count("\n") + 1
+            dangling.append((full, line_no))
+    if dangling:
+        uniq = sorted({d[0] for d in dangling})
+        detail = "\n  ".join(
+            "%s（首次出现约第 %d 行）" % (full, line_no) for full, line_no in dangling[:12]
+        )
+        raise SystemExit(
+            "[%s] 产物里残留悬空命名空间前缀，摊平后这些对象都不存在：\n  %s\n"
+            "  修法：把 %s 加进 build-plugin.py 的 CORE_EXPORTS 对应清单。\n"
+            "  不修的后果：一执行就 ReferenceError —— 界面整个不出现。"
+            % (PKG, detail, " / ".join(uniq))
         )
 
     # ESM 别名泄漏检查

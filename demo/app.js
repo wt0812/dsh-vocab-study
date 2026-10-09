@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-09T15:46:43
+ * 构建时间：2026-10-09T17:51:40
  */
 'use strict';
 
@@ -3212,9 +3212,15 @@ function createApp(ports = {}) {
       // 不能只读 container.stats.newBlocked —— 容器一天只建一次，
       // 建的时候今天还没答题，那个字段天然恒为 false（死代码）。
       // 这里用和组队时同一个 shouldBlockNew()，保证口径一致。
+      //
+      // `state.settings` 必须带兜底：面板在 createPanelPuppet 里是**先 append
+      // 再异步 init**（adapter/dsh/puppet.mjs 的 `void ensureReady()`），所以
+      // 第一帧渲染时 settings 还是 null。读 `.allowMoreNew` 会抛
+      // "Cannot read properties of null" —— 渲染中断，用户看到的就是空标签页。
+      // 初始化完成后 ensureReady() 会再 render 一次，那时才是真设置。
       newGate: (() => {
         const blocked = Q.shouldBlockNew(todayStats());
-        const bypassed = !!state.settings.allowMoreNew;
+        const bypassed = state.settings?.allowMoreNew === true;
         return {
           autoBlocked: blocked,           // 自动判断：今天该不该停推新词
           bypassed,                       // 用户是否已显式放行

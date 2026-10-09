@@ -154,6 +154,59 @@ ok(
   '.vs-card 里没有 margin 简写（简写会覆盖左右 auto，居中静默失效）',
 );
 
+console.log('\n=== 11) 产物里不能有悬空的命名空间前缀（2026-10-09 黑屏事故）===');
+// 这是一次真实事故，而且是**最难查的一类**：界面整个不出现，但 7 个测试套件
+// 全绿、构建成功、装好了也激活了。
+//
+// 事故链条：
+//   1. 新功能用到 Q.shouldBlockNew()（core/queue.mjs 的导出）
+//   2. build-plugin.py 的 CORE_EXPORTS 清单漏登记这个名字
+//   3. 打包器的 rewrite_namespaces() 只替换**清单里有的**成员，
+//      于是 `Q.shouldBlockNew(...)` 原样留在产物里
+//   4. 单文件产物把 19 个文件摊平进同一作用域，**根本没有 `Q` 这个对象**
+//   5. 那句话在 snapshotState() 里 —— 也就是渲染第一帧
+//   6. → ReferenceError → 面板建不出来 → 用户点开标签页看到的是一片黑
+//
+// 为什么测试全绿：core/round-control.test.mjs 直接 `import core/app.mjs`，
+// 走的是真 ESM 命名空间，`Q` 当然存在。**只有产物形态会炸。**
+// 所以这一条必须针对 lib/client.js 断言，不能靠单元测试。
+//
+// 判据（这里我写错过一次，记下来免得再犯）：
+//
+// 第一版我用「成员名在 setCore 注册表里就跳过」来排除误报。但 `shouldBlockNew`
+// **本身就是合法成员**（它被正确登记了），于是 `Q.shouldBlockNew` 这个真·悬空
+// 引用被我的"跳过"规则放过了 —— 好样本坏样本都判 0，断言永远不会红。
+// 一个不会失败的断言比没有断言更坏。
+//
+// 正确判据看**前缀本身**：摊平后根本没有 `Q` 这个变量（只有裸函数
+// shouldBlockNew），所以任何 `Q.xxx` 都是错的 —— 与 xxx 叫什么无关。
+// 反过来 `M.foo` 可能是合法的局部对象（某个 `const M = {...}`），
+// 所以必须先查"这个前缀在产物里有没有被声明"。
+const NS_PREFIXES = ['M', 'MK', 'SEED', 'L', 'SP', 'HK', 'Q', 'G', 'B', 'S', 'A'];
+const dangling = new Map();
+for (const prefix of NS_PREFIXES) {
+  const declared = new RegExp(
+    String.raw`(?:^|[\s,;({\[])(?:const|let|var|function|class)\s+${prefix}\b` +
+      String.raw`|\b${prefix}\s*[:=]` +
+      String.raw`|\(\s*${prefix}\b`,
+    'm',
+  ).test(noComment);
+  if (declared) continue; // 产物里真有这个变量，是合法局部对象
+  const re = new RegExp(String.raw`\b${prefix}\.([A-Za-z_$][\w$]*)`, 'g');
+  for (const m of noComment.matchAll(re)) {
+    const full = `${prefix}.${m[1]}`;
+    if (!dangling.has(full)) dangling.set(full, noComment.slice(0, m.index).split('\n').length);
+  }
+}
+ok(
+  dangling.size === 0,
+  dangling.size === 0
+    ? '没有悬空命名空间前缀（摊平后不存在的对象没有被调用）'
+    : '发现悬空前缀（摊平后这些对象不存在，一执行就 ReferenceError、界面全黑）：' +
+        [...dangling].map(([k, l]) => `${k}@约${l}行`).join(', ') +
+        ' —— 修法：加进 tools/build-plugin.py 的 CORE_EXPORTS',
+);
+
 console.log(`\n${bad === 0 ? '✅ 全部通过' : `❌ ${bad} 项未通过`}`);
 process.exit(bad === 0 ? 0 : 1);
 
