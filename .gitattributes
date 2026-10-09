@@ -16,9 +16,11 @@
 # PowerShell 脚本给 Windows 用，留 CRLF
 *.ps1   text eol=crlf
 
-# 已构建产物：不要当文本处理，也不要合并冲突
-lib/client.js  -text -diff
-lib/index.js   -text -diff
+# 已构建产物：构建脚本已用 newline="\n" 强制 LF，所以这里**不要**标 -text。
+# 标了 -text 反而会让 git 跳过归一化，把历史上存下来的 CRLF 原样留住。
+# 保留 -diff 只是因为它是单行巨型文件，diff 没意义。
+lib/client.js  -diff
+lib/index.js   -diff
 
 # 图片二进制
 *.png binary

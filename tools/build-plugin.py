@@ -556,11 +556,14 @@ def main():
     if not os.path.isdir(lib):
         os.makedirs(lib)
 
-    with io.open(os.path.join(lib, "client.js"), "w", encoding="utf-8") as f:
+    # newline="\n" 是必须的：默认模式下 Python 在 Windows 上把 \n 翻成 CRLF，
+    # 于是同一份源码在不同平台构建出的 lib/client.js 字节数不同（266670 vs 260049），
+    # 哈希对不上，"校验产物完整性"就成了假命题。换行符必须与平台无关。
+    with io.open(os.path.join(lib, "client.js"), "w", encoding="utf-8", newline="\n") as f:
         f.write(client)
 
     # Host 侧入口：本插件不需要 Host 逻辑，但包要有一个可解析的主入口。
-    with io.open(os.path.join(lib, "index.js"), "w", encoding="utf-8") as f:
+    with io.open(os.path.join(lib, "index.js"), "w", encoding="utf-8", newline="\n") as f:
         f.write(
             "// %s — Host 侧入口（由 tools/build-plugin.py 生成）\n"
             "//\n"
