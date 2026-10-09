@@ -191,8 +191,60 @@ export function createPanel(app, ctx = {}) {
   function renderToday(host, st) {
     const card = st.card;
     if (!card) {
-      // 空状态：文案永不指责（§6.3）
       clear(host);
+      // 两种"没有卡"要分开，因为它们该给的东西完全不同：
+      //   · 本轮走完了 → 用户需要「再背一轮 / 再来几个新词」（本次修复的抱怨②③）
+      //   · 今天本来就没有要背的 → 只能换本词库（原来只有这一种，且文案把
+      //     "背完一轮"也说成"没有需要复习的词"，等于把用户的成果说成空虚）
+      const roundDone = st.roundFinished && (st.roundSize > 0 || (st.stats && st.stats.todayAnswered > 0));
+      if (roundDone) {
+        const gate = st.newGate || {};
+        const todayN = (st.stats && st.stats.todayAnswered) || 0;
+        const extra = st.extendedBy || 0;
+        mount(
+          host,
+          el('div', { class: 'vs-empty vs-round-done' }, [
+            el('div', { class: 'vs-done-title', text: '这一轮走完了' }),
+            el('div', {
+              class: 'vs-done-sub',
+              // 只陈述事实，不夸奖也不催（§6.3）。数字是用户自己的，不用形容词。
+              text: todayN
+                ? `今天已背 ${todayN} 词${extra ? `（其中自己加了 ${extra} 次量）` : ''}`
+                : '这一轮已经过了一遍',
+            }),
+          ]),
+          // ① 再背一轮：把刚才这一批重来一遍
+          st.canRestart
+            ? el('div', { style: { textAlign: 'center' } },
+                el('button', { class: 'vs-btn primary', onclick: () => app.restartRound() }, '再背一轮'))
+            : null,
+          // ② 自己往后背：突破当天计划，每次 +5
+          //
+          // 闸门关着时**不给这个按钮**。实测过：闸门一关，新词池就被挡住，
+          // extendRound 会把容器从 20 扩到 25，但新增词数是 0 —— 按钮点下去
+          // 什么也没发生。一个"点了没反应"的按钮比没有按钮更坏，所以这里
+          // 直接不显示它，只留下真正有效的那条路（「我还是想继续」）。
+          !gate.closed
+            ? el('div', { style: { textAlign: 'center' } },
+                el('button', { class: 'vs-btn', onclick: () => app.extendRound(5) }, '再来 5 个新词'))
+            : null,
+          // ③ 安全阀关着时，把门交给用户自己开
+          gate.closed
+            ? el('div', { class: 'vs-gate' }, [
+                el('div', { class: 'vs-gate-note', text: '新词先停一下 · 今天错的有点多' }),
+                el('button', { class: 'vs-btn', onclick: () => app.allowMoreNew() }, '我还是想继续'),
+              ])
+            : null,
+          el('div', { style: { textAlign: 'center' } },
+            el('button', { class: 'vs-btn muted', onclick: () => setTab('settings') }, '换词库')),
+          // 数据带也要在走完一轮时留着：用户此刻最想确认的就是"我今天背了多少"，
+          // 把数字在他达成的那一刻收走是最不该的。
+          el('div', { class: 'vs-deck vs-deck-done' }, deckContent(st)),
+          st.report ? weeklyCard(st.report) : null,
+        );
+        return;
+      }
+      // 真的没词可背：文案永不指责（§6.3）
       mount(
         host,
         el('div', { class: 'vs-empty', text: '今天没有需要复习的词 · 去换本新的？' }),
@@ -282,15 +334,38 @@ export function createPanel(app, ctx = {}) {
     );
   }
 
-  function updateDeck(host, st) {
-    const deck = host.querySelector('#vs-deck');
-    if (!deck) return;
+  /**
+   * 数据带的内容（进度环 + 指标 + 热力图）。
+   *
+   * 抽成独立函数是因为它现在有两个使用场景：
+   *   · 有词卡时（cardShell 里的 #vs-deck，由 updateDeck 刷新）
+   *   · 一轮走完时（空状态页）
+   * 原来只有前者，于是「今天已背 N 词」恰好在用户最想确认成果的那一刻
+   * 消失不见 —— 而本轮修复的起点就是"背了却看不到"。
+   */
+  function deckContent(st) {
     const stats = st.stats || {};
-    const done = st.container?.done ?? 0;
-    const size = st.container?.stats?.containerSize ?? 0;
-    const pct = size ? Math.min(1, done / size) : 0;
+    // 环表示**这一轮**的进度：已答 / 本轮计划。
+    //
+    // 为什么不用 container.done（原来用的就是它）：那个值是跨轮累加的，
+    // 一旦用户点了「再背一轮」，新一轮的 answered 从 0 开始，而 container.done
+    // 还停在上一轮的数字，于是环和「今天已背」互相矛盾 —— 实测：重背后答 1 个，
+    // 环显示 1，而今日已背显示 6。用户会以为数字坏了。
+    // 现在两件事各归各位：环 = 这一轮（session），KPI = 今天（stats）。
+    const roundDone = st.session ? st.session.stats.answered : (st.container?.done ?? 0);
+    const roundSize = st.session?.plannedSize ?? st.container?.stats?.containerSize ?? 0;
+    const pct = roundSize ? Math.min(1, roundDone / roundSize) : 0;
 
     const kpis = [];
+    // 「今天背了几个」放第一个。
+    // 用户原话：「我今天背了几个词不显示，只显示多少词被收服，这并不满足我
+    // 抽空背诵的理念」——抽空背 3 个就走的场景里，"已收服总量"几乎不动，
+    // 看起来像没背过。今日数量才是他当场能确认"我今天确实背了"的东西。
+    // 数据来自 stats.todayAnswered（一直算着，只是从前没显示）。
+    kpis.push(el('span', { class: 'vs-kpi' }, [
+      el('b', { text: String(stats.todayAnswered ?? 0) }),
+      el('i', { text: '今天已背' }),
+    ]));
     kpis.push(el('span', { class: 'vs-kpi' }, [
       el('b', { text: String(stats.conquered ?? 0) }),
       el('i', { text: '词已收服' }),
@@ -310,7 +385,7 @@ export function createPanel(app, ctx = {}) {
 
     const parts = [
       el('div', { class: 'vs-deck-top' }, [
-        el('div', { class: 'vs-ringwrap', html: ringSvg(pct, size ? `${Math.min(done, size)}/${size}` : '—') }),
+        el('div', { class: 'vs-ringwrap', html: ringSvg(pct, roundSize ? `${Math.min(roundDone, roundSize)}/${roundSize}` : '—') }),
         el('div', { class: 'vs-kpis' }, kpis),
       ]),
     ];
@@ -320,7 +395,13 @@ export function createPanel(app, ctx = {}) {
         heatmap(stats.heatmap),
       ]));
     }
-    mount(deck, parts);
+    return parts;
+  }
+
+  function updateDeck(host, st) {
+    const deck = host.querySelector('#vs-deck');
+    if (!deck) return;
+    mount(deck, deckContent(st));
   }
 
   function updateCard(host, st, card, fresh) {

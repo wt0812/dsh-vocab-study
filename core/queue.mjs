@@ -218,10 +218,16 @@ export function buildDailyContainer(words, mem, opts = {}) {
     personalUsed++;
   }
   // 3) 新词填满剩余名额
+  //
+  // allowMoreNew：用户本人显式按了「我还是想继续」。
+  // 安全阀（当天新词答错率 > 70% 自动停推新词）仍然保留并照常自动触发，
+  // 但它不再是一堵没有门的墙 —— 门只有用户能开，代码不会替他开。
+  // 规格 §7.6 原本写的是"无需询问"，用户的实际意见是"要询问我、但让我决定"。
   const cushion = reserveCushion(words, mem, opts);
+  const bypassBlockNew = !!(opts && opts.allowMoreNew);
   for (const it of newPool) {
     if (used >= N) break;
-    if (cushion.blockNew) break;
+    if (cushion.blockNew && !bypassBlockNew) break;
     items.push(it);
     used++;
   }
@@ -254,6 +260,11 @@ export function buildDailyContainer(words, mem, opts = {}) {
     containerSize: N,
     balance,
     offline: !!opts.offline,
+    // 新词闸门：自动触发过、或本次是被用户显式放行。
+    // UI 用这两个字段决定"要不要给用户一个『我还是想继续』的入口"——
+    // 闸门关着时给入口，用户放行后就不再追着问。
+    newBlocked: cushion.blockNew && !bypassBlockNew,
+    newBlockBypassed: cushion.blockNew && bypassBlockNew,
   };
 
   return { items, stats, explanation: explain(items, words, mem, { ...opts, now, N }) };
@@ -261,6 +272,21 @@ export function buildDailyContainer(words, mem, opts = {}) {
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0.5));
+}
+
+/**
+ * 新词闸门：当天新词答错率 > 70% 且已答满 5 个新词 → 停止推新词（§7.6）。
+ *
+ * 为什么单独抽成一个函数：原来这段判断写在组队流程里，而组队**一天只跑一次**
+ * （开局建容器时），那一刻 todayStats().newAnswerCount 恒为 0，所以闸门
+ * 从来没真正关上过 —— 规格 §7.6 是一条实际不生效的死规则。测试
+ * test/round-control.test.mjs 把它抓了出来。
+ * 现在 UI 每次取快照都用同一个函数重算，保证"界面上看到闸门状态"和
+ * "组队时是否推新词"用的是同一口径。
+ */
+export function shouldBlockNew(todayStats) {
+  if (!todayStats) return false;
+  return todayStats.newAnswerCount >= 5 && todayStats.newWrongRate > 0.7;
 }
 
 /**
@@ -277,8 +303,7 @@ function reserveCushion(words, mem, opts) {
     .slice(0, cushionTarget);
 
   const allLearned = learned.length >= words.length * 0.95 && learned.length > 0;
-  const stats = opts.todayStats;
-  const blockNew = !!(stats && stats.newAnswerCount >= 5 && stats.newWrongRate > 0.7);
+  const blockNew = shouldBlockNew(opts.todayStats);
   return { weakest, allLearned, blockNew };
 }
 

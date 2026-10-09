@@ -307,25 +307,37 @@
  *   v2  让 #vs-stage 吸收（flex:1）
  *       → stage 涨到 574px，"一行提示语浮在一大片留白中间"，更糟
  *   v3  两端各 auto（actions margin-top/bottom:auto）
- *       → 视觉检查判定 4/10：**卡片内部中间被挖出约 30% 的死区**，
- *         比原问题更难看。数据（FILL=83.8%）好看，但数据不等于观感。
- *   v4（当前）
- *       → 承认一件事：停靠面板里内容本来就不该被抻满 800px。
- *         正确解不是"让卡片长满"，而是"让长高的那部分有用途"：
- *         · #vs-stage 吸收余量 —— 它在**揭晓后**要放词义/例句，
- *           本来就需要更多高度；现在空态它只是多留白，展开后被真正用上
- *         · 评分按钮沉到底部拇指区，不再独占余量、也不产生中间死区
- *         · 板块之间用固定档位间距，避免"上紧下松"的怪比例
+ *       → 视觉检查判定 4/10：**卡片内部中间被挖出约 30% 的死区**
+ *   v4  deck 吃余量 + 贴底，stage 不吸收（flex:0 1 auto）
+ *       → 词卡下约 450px 空洞。两条规则各自"看着合理"，合起来必然如此
+ *   v5a 三段式：stage 吸收余量 + 提示语居中，deck 不增长
+ *       → 我的 DOM 测量说"最大间隙 12.2px"，但真实截图仍有约 275px 空洞。
+ *         **是我的测量方法有盲区**：脚本只算"相邻子元素之间的间隙"，
+ *         而这块空白是 #vs-stage **自己被 flex 拉高**之后内部留下的空腔 ——
+ *         stage 里只有一个提示语，它涨到几百像素，多出来的高度就全是空的。
+ *         教训：元素的间隙可以量，元素自己变成空壳量不出来。
+ *   v5b（当前，锁定内容组）
+ *       → 不再让任何**有内容**的元素吸收余量。卡片变成：
+ *         · 上半：badges + headline + word + ipa 贴顶（flex 0 0 auto）
+ *         · 中下：#vs-stage 里的提示语 + .vs-actions 里的评分按钮
+ *           —— 这两个是用户要连着看的东西（先读提示再打分），
+ *              它们之间只有 12px，不再被拆到屏幕两端
+ *         · 底部：.vs-deck 贴底（margin-top:auto 吃掉全部余量）
+ *         余量因此只出现在**内容组和数据带之间**这一处，
+ *         而那里正是"当前这张卡 → 累计态势"的分界，留白是分层的表达。
  */
 .vs-panel.docked .vs-card > #vs-stage {
-  flex: 0 1 auto;
+  /* 不吸收余量：它里面只有一个提示语，涨高就变空壳 */
+  flex: 0 0 auto;
   min-height: 0;
   margin-bottom: 12px;
-  /* 提示语靠上放，余量留在它下方 —— 展开词义时这块正好被填满 */
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  align-items: flex-start;
 }
+/* 评分按钮：贴住提示语下方（先读提示再打分，不该被拆开），
+   整组由下面的 .vs-deck 的 margin-top:auto 推到面板底部 */
 .vs-panel.docked .vs-card > .vs-actions { margin-top: 0; }
 
 /*
@@ -341,23 +353,42 @@
  */
 .vs-deck { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--vs-line-soft); }
 /*
- * 数据带沉到卡片底部，并且**自己吃掉剩余高度**。
+ * 数据带贴底，但**不吸收余量**（v5 修正）。
  *
- * 实测（450x1032，卡片 800px）：deck 只占 160px 时，
- * 卡片顶部内容（badges+headline+word+ipa+stage+actions ≈ 190px）
- * 和数据带之间留着约 389px 空白 —— 等于又把空洞搬进了卡片内部。
- *
- * 所以：deck 设 flex:1（吃掉剩余），内部内容贴底对齐。
- * 空白就变成"当前这张卡 → 留白 → 累计态势"的有意分层，
- * 而不是一块没人管的空隙。
+ * v4 让它 flex:1 + justify-content:flex-end，等于把卡片里所有 slack 都塞进
+ * 它内部、再把内容压到底部 —— 那正是"词卡下方 450px 空洞"的来源。
+ * 现在余量归中段 #vs-stage（见上面的三段式说明），数据带只做自己那一层，
+ * 高度由内容决定。这样底部那条分隔线不可能再离内容很远。
  */
 .vs-panel.docked .vs-card > .vs-deck {
-  margin-top: 16px;
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 14px;
+  flex: 0 0 auto;
+}
+/*
+ * ── 高度响应：内容跟着面板一起长大 ────────────────────────────
+ * 为什么加这一段（又是一次"搬空白"之后的醒悟）：
+ *
+ * 实测四种视口高度下「评分按钮底 → 数据带顶」的空白：
+ *     760px → 0px      1032px → 0px     1200px → 49px     1600px → 102px
+ * 空白随高度线性增长。而卡片子元素的对账显示 #vs-stage 自己有 168px
+ * 是空的（里面只有一个提示语）。
+ *
+ * 结论：面板能高到 1600px，而内容量是固定的 —— 无论把余量分给哪个元素、
+ * 放到哪一处，那处都会变成空洞。**正确解不是搬空白，是让内容长高。**
+ * 高度明显增大时，单词、音标、指标数字、按钮都该跟着变大：这既填掉了
+ * 空间，又正好是背单词应用该有的样子（屏幕上只有一张卡时，字就该大）。
+ *
+ * 用 vh 而不是像素：面板高度就是窗口高度，vh 直接跟随。
+ * 上界都留了（clamp 的第三个参数），避免超高屏幕上字大到荒唐。
+ */
+@media (min-height: 1000px) {
+  .vs-panel.docked .vs-card > .vs-word { font-size: clamp(27px, 4.3vh, 68px); }
+  .vs-panel.docked .vs-card > .vs-ipa { font-size: clamp(13px, 1.4vh, 22px); }
+  .vs-panel.docked .vs-kpi b { font-size: clamp(21px, 1.9vh, 36px); }
+  .vs-panel.docked .vs-kpi i { font-size: clamp(11.5px, 1vh, 18px); }
+  .vs-ringwrap, .vs-ring { width: clamp(68px, 6vh, 116px); height: clamp(68px, 6vh, 116px); }
+  .vs-panel.docked .vs-card > .vs-actions { padding-top: 1.2vh; padding-bottom: 1.2vh; }
 }
 .vs-deck-top { display: flex; align-items: center; gap: 16px; }
 .vs-ringwrap { flex: 0 0 auto; width: 68px; height: 68px; display: block; }
@@ -381,6 +412,21 @@
 }
 .vs-kpi i { font-style: normal; font-size: 11.5px; color: var(--vs-ink-faint); }
 .vs-deck-heat { margin-top: 16px; }
+/*
+ * 一格都没学过时，整片热力图不该占地方。
+ *
+ * heatmap() 永远返回 15x7 = 105 个格子，没学过的日子 level=0，
+ * 而 level 0 的格子用 --vs-line-soft（极淡）—— 结果就是一条
+ * "看不见但又占着高度"的灰带，还配着「这半个月」的标签，
+ * 等于告诉用户"这里本该有东西，但你没有"。既不美观也在指责人（§6.3）。
+ *
+ * 只在**全部格子都是 level 0** 时隐藏（:has 全部匹配）。
+ * 保留格子本身而不是隐藏整个 deck —— 进度环和两个指标仍然有用。
+ * 注意选不到 .vs-panel 里「进度」页签那份热力图（那里有数据才显示）。
+ */
+.vs-deck-heat:has(.cell[data-l="0"]):not(:has(.cell[data-l="1"])):not(:has(.cell[data-l="2"])):not(:has(.cell[data-l="3"])):not(:has(.cell[data-l="4"])) {
+  display: none;
+}
 .vs-deck-heat .lbl { display: block; font-size: 11.5px; color: var(--vs-ink-faint); margin-bottom: 7px; }
 .vs-deck-heat .vs-heat { margin-top: 0; gap: 5px; }
 .vs-deck-heat .vs-heat .col { gap: 5px; }
@@ -609,6 +655,26 @@
 .vs-heat .cell[data-l="3"] { background: rgba(31, 157, 143, .72); }
 .vs-heat .cell[data-l="4"] { background: var(--vs-jade); }
 .vs-empty { font-size: 12.5px; color: var(--vs-ink-faint); padding: 18px 2px; text-align: center; }
+
+/* ── 一轮走完 ────────────────────────────────────────────────────
+ * 用户原话：「我背完一轮后，只能显示这个，难道我就不能重新背一遍吗，
+ * 或者我就不能自己往后背吗」。所以这里不再是"什么都没有"，而是一个
+ * 明确告诉他"你完成了 + 接下来你可以选"的地方。
+ *
+ * 文案纪律（规格 §6.3 零指责）：只说事实和自己的数字，不用形容词。
+ * 「这一轮走完了」不是「太棒了！」；「今天已背 12 词」不是「才背了 12 个」。
+ * 背单词应用最容易犯的错就是替用户评价他自己。
+ */
+.vs-round-done { padding: 22px 2px 8px; }
+.vs-done-title { font-size: 15px; color: var(--vs-ink); font-weight: 600; margin-bottom: 6px; }
+.vs-done-sub { font-size: 12.5px; color: var(--vs-ink-faint); line-height: 1.6; }
+
+/* 新词闸门：拦下来了，但把决定权交给用户本人 */
+.vs-gate {
+  margin: 10px auto 0; max-width: 260px; padding: 10px 12px;
+  background: var(--vs-chip); border-radius: var(--vs-radius); text-align: center;
+}
+.vs-gate-note { font-size: 11.5px; color: var(--vs-ink-soft); margin-bottom: 8px; line-height: 1.5; }
 .vs-list { display: flex; flex-direction: column; gap: 1px; }
 .vs-row {
   display: flex; align-items: baseline; gap: 8px; padding: 6px 2px;

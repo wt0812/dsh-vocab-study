@@ -81,7 +81,7 @@ CORE_EXPORTS = {
     "Q": ["DAY_START_HOUR", "dayKey", "dayStartTs", "daysBetweenKeys", "priorDayKey",
           "containerSize", "comebackCopy", "buildDailyContainer", "explain", "badgesFor",
           "emptyState", "CHECKIN_RATIO", "isCheckedIn", "bumpStreak", "isPaused",
-          "effectiveBaseN", "TIER", "seededRandom", "seededShuffle"],
+          "effectiveBaseN", "TIER", "seededRandom", "seededShuffle", "shouldBlockNew"],
     "G": ["COMBO_STEPS", "comboMult", "COMBO_FREEZE_MS", "newCombo", "stepCombo",
           "freezeCombo", "resumeCombo", "LEVELS", "levelFor", "expFor", "conqueredCount"],
     "B": ["BECKON", "TONE", "LONG_GONE_DAYS", "SOLID_DAYS", "beckonState",
@@ -92,6 +92,17 @@ CORE_EXPORTS = {
           "advance", "ensureNewWordCap", "undoLast", "buildQuiz", "submitQuiz",
           "humanizeConfusion", "reportFakeMastery", "pauseSession", "resumeSession",
           "snapshot", "restore"],
+    # ── 这份清单和"模块导出了什么"不是一回事，两种符号要分开看 ──
+    #  · 顶层 function 声明（如 queue.mjs 的 shouldBlockNew）：
+    #      摊平后确实是顶层绑定，**必须**列在这里，否则命名空间对象里
+    #      没有这个属性（`Q.shouldBlockNew is not a function`）。
+    #  · 工厂内部的闭包函数（如 app.mjs 里 createApp 内的 restartRound /
+    #      extendRound / allowMoreNew）：顶层根本没有绑定。列进来会生成
+    #      `const A = { createApp, restartRound, ... }` → ReferenceError，
+    #      整个包一加载就崩。界面用 `app.restartRound()` 走实例，不需要裸名。
+    # 两种情况我都写错过一次，各自被两个不同测试抓到：
+    #   漏列 shouldBlockNew → demo-boot 报 Q.shouldBlockNew is not a function
+    #   多列 restartRound   → demo-boot 报 restartRound is not defined
     "A": ["createApp"],
 }
 

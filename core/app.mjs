@@ -44,6 +44,9 @@ export function createApp(ports = {}) {
     container: null,
     session: null,
     lastReveal: null,
+    // 「再背一轮」用的那一批卡（不含同轮重训插入）；「自己往后背」的加量次数。
+    roundItems: null,
+    extendCount: 0,
     offline: false,
     banner: null,
     librarySource: 'seed',
@@ -84,6 +87,25 @@ export function createApp(ports = {}) {
       librarySource: state.librarySource,
       stats: computeStats(),
       empty: !state.container || state.container.items.length === 0,
+      // 本轮是否已经跑完（用来决定"再背一轮 / 再来几个新词"要不要出现）
+      roundFinished: !state.session || S.isFinished(state.session),
+      // 本轮排过的卡数（不含同轮重训插入），用于文案「这一轮 20 词」
+      roundSize: (state.roundItems || []).length,
+      extendedBy: state.extendCount || 0,
+      canRestart: !!(state.roundItems && state.roundItems.length),
+      // 新词闸门状态：**每次快照实时重算**。
+      // 不能只读 container.stats.newBlocked —— 容器一天只建一次，
+      // 建的时候今天还没答题，那个字段天然恒为 false（死代码）。
+      // 这里用和组队时同一个 shouldBlockNew()，保证口径一致。
+      newGate: (() => {
+        const blocked = Q.shouldBlockNew(todayStats());
+        const bypassed = !!state.settings.allowMoreNew;
+        return {
+          autoBlocked: blocked,           // 自动判断：今天该不该停推新词
+          bypassed,                       // 用户是否已显式放行
+          closed: blocked && !bypassed,    // 当前是否真的关着（关着才给用户入口）
+        };
+      })(),
     };
   }
 
@@ -158,6 +180,9 @@ export function createApp(ports = {}) {
       paused: s.paused || null,
       vacationUntil: s.vacationUntil || null,
       dismissedProposals: s.dismissedProposals || {},
+      // 用户显式放行新词闸门。默认 false（安全阀照常自动触发）；
+      // 只有用户本人按了「我还是想继续」才变 true，代码不会替他打开。
+      allowMoreNew: s.allowMoreNew === true,
       prompts: s.prompts || defaultPrompts(),
       schemaVersion: 1,
     };
@@ -184,6 +209,7 @@ export function createApp(ports = {}) {
         now: now(),
         collections: state.settings.collections,
         todayStats: todayStats(),
+        allowMoreNew: !!state.settings.allowMoreNew,
         // 新词随机顺序的种子 = 今天。同一天内结果稳定，所以中途重开面板
         // 仍然是「从第 N 个词继续」（规格 §7.2 / §540）；换一天换一个排法。
         seed: key,
@@ -195,7 +221,131 @@ export function createApp(ports = {}) {
       baseN: state.settings.dailyGoal,
       autoN: auto,
     };
+    // 本轮"排过队的词"（不含同轮重训插入）。「再背一轮」据此重建同一批卡：
+    // 不重新选词，所以重背的就是刚才那一批，不会偷偷换成别的词。
+    state.roundItems = state.container.items.map((it) => ({ ...it }));
     state.session = S.createSession({ ...state.container, dayKey: key }, sessionOpts());
+    persist();
+    emit();
+    return state.container;
+  }
+
+  /**
+   * 再背一轮：把刚才这一批卡重新跑一遍。
+   *
+   * 为什么不复用 buildContainer()：那个会重新选词（种子虽然按天稳定，但
+   * mem 已经变了，到期/新词池都不同），重背出来的就不是刚才那一批了。
+   * 用户要的是"把这一轮再来一次"，所以拿 roundItems 原样重建。
+   *
+   * 注意：这里**不动**任何记忆数据。重背只是多练一遍，答错照样照常更新记忆，
+   * 所以"再背一轮"既不是惩罚也不是刷分，就是再练一次。
+   */
+  function restartRound() {
+    if (!state.roundItems || !state.roundItems.length) return null;
+    const dayKey = state.dayKey || Q.dayKey(now());
+    state.session = S.createSession(
+      { items: state.roundItems, stats: { ...(state.container?.stats || {}), containerSize: state.roundItems.length }, dayKey },
+      sessionOpts(),
+    );
+    state.lastReveal = null;
+    persist();
+    emit();
+    return state.session;
+  }
+
+  /**
+   * 再来几个新词：突破当天计划 N，继续往后取。
+   *
+   * 自己控制"多背多少"：每点一次，目标加 5 个（不超过 dailyGoal）。
+   * 为什么不一次给很多：用户说的是"能不能自己往后背"，要的是**由他决定继续**，
+   * 不是系统一口气塞 100 个给他。一次 5 个，想继续再点。
+   */
+  function extendRound(batch = 5) {
+    const base = state.container?.autoN || state.container?.baseN || state.settings.dailyGoal || 20;
+    const step = Math.max(1, Math.min(20, Math.round(batch)));
+    const next = (state.extendCount || 0) + 1;
+    state.extendCount = next;
+    const targetN = base + step * next;
+    const key = state.dayKey || Q.dayKey(now());
+    // 已经排过队的词不再重复加入，所以第二次点只会补进"新的"那 5 个
+    const already = new Set((state.roundItems || []).map((it) => it.word.id));
+    const built = Q.buildDailyContainer(personalToWords(), state.mem, {
+      N: targetN,
+      gapDays: state.container?.gapDays ?? gapDays(),
+      balance: state.settings.balance,
+      now: now(),
+      collections: state.settings.collections,
+      todayStats: todayStats(),
+      allowMoreNew: !!state.settings.allowMoreNew,
+      seed: key,
+      order: state.settings.order,
+    });
+    const fresh = built.items.filter((it) => !already.has(it.word.id));
+    const merged = [...(state.roundItems || []), ...fresh.map((it) => ({ ...it }))];
+    state.container = {
+      ...state.container,
+      ...built,
+      items: merged,
+      stats: { ...built.stats, containerSize: targetN, size: merged.length },
+      dayKey: key,
+      baseN: state.settings.dailyGoal,
+      autoN: base,
+      extendedBy: state.extendCount,
+    };
+    state.roundItems = merged.map((it) => ({ ...it }));
+    // 续上正在背的这一轮：保留已有卡（不重考），把新词接在后面
+    const s = state.session;
+    if (!s || S.isFinished(s)) {
+      state.session = S.createSession({ ...state.container, dayKey: key }, sessionOpts());
+    } else {
+      const have = new Set(s.queue.map((c) => c.word.id));
+      const add = fresh.filter((it) => !have.has(it.word.id));
+      if (add.length) {
+        const extra = S.createSession(
+          { items: add, stats: built.stats, dayKey: key }, sessionOpts(),
+        ).queue;
+        for (const c of extra) s.queue.push(c);
+        // 同上：本轮总量要跟着队列一起长，否则环会说"这一轮已经完了"
+        s.plannedSize = Math.max(s.plannedSize || 0, s.queue.length);
+      }
+    }
+    state.lastReveal = null;
+    persist();
+    emit();
+    return state.container;
+  }
+
+  /** 用户显式放行新词闸门（安全阀仍自动触发，只是不再无法绕过）。 */
+  function allowMoreNew() {
+    state.settings = { ...state.settings, allowMoreNew: true };
+    buildContainer();
+    // 放行之后必须**立刻给出卡**，而且只给还没背过的。
+    //
+    // 两个坑都在这几行里：
+    //  1. buildContainer() 只是把容器重建（新词回到 container.items），
+    //     但当前 session 已经走完了。不重开一场的话，界面会回到"这一轮
+    //     走完了"，用户点了「我还是想继续」却什么也没发生。
+    //  2. 更隐蔽的：container.items 里既有没有背过的**新词**，也有刚刚
+    //     已经答完的卡。而 createSession 无条件把 items 全变成
+    //     answered:false 的新队列 —— 直接把容器丢给它，等于让用户把
+    //     刚背完的词原样再背一遍。所以要显式滤掉已答的。
+    //     （这个坑我在无头浏览器里点出来才发现：点「我还是想继续」后，
+    //      环显示 0/20、当前词是刚背过的第一个词。）
+    const answered = new Set();
+    if (state.session) {
+      for (const c of state.session.queue) if (c.answered) answered.add(c.word.id);
+    }
+    const pending = state.roundItems.filter((it) => !answered.has(it.word.id));
+    if (pending.length) {
+      // 用 state.dayKey：buildContainer 里有它自己的 const key，出了那个函数
+      // 就没了（我第一版直接写 key，会踩作用域错）。buildContainer 已经把
+      // state.dayKey 设好了，restartRound 也是这么读的。
+      state.session = S.createSession(
+        { items: pending, stats: state.container.stats, dayKey: state.dayKey },
+        sessionOpts(),
+      );
+    }
+    state.lastReveal = null;
     persist();
     emit();
     return state.container;
@@ -250,9 +400,57 @@ export function createApp(ports = {}) {
       card,
       extra,
     });
+    enforceNewGate(s);
     persist();
     emit();
     return payload;
+  }
+
+  /**
+   * 让新词闸门**真的生效**。
+   *
+   * 第二个真问题（第一个是判断用了永远为 0 的统计量）：容器是一天开局建一次的，
+   * 那时还没答题、闸门必然算成"开"；等答完几个新词、答错率超过 70% 时，
+   * 判断虽然变成"该关"，但**已经建好的队列不会因此改变** —— 判断结果对
+   * 已排好的卡没有任何作用。规格 §7.6 因此还是一条空规则。
+   *
+   * 这里在每次作答后执行：闸门刚关上时，把本轮还没答的**新词**从队列里撤掉。
+   * 三条克制：
+   *   · 只撤"还没答"的新词；已答的不动（不抹掉用户已经做完的事）
+   *   · 不撤复习词/收藏词（那些是维护记忆，与推新词无关，撤回会让记忆断档）
+   *   · 撤掉不是作废：这些词没被标记学过，明天照常轮得到
+   * 用户按下「我还是想继续」后 settings.allowMoreNew = true，本函数不再介入。
+   */
+  function enforceNewGate(s) {
+    if (!s) return 0;
+    if (state.settings.allowMoreNew) return 0;
+    if (!Q.shouldBlockNew(todayStats())) return 0;
+    const before = s.queue.length;
+    // 撤掉 cursor 之后所有"还没答"的新词。已答过的卡都在 cursor 之前，不进候选人。
+    const head = s.queue.slice(0, s.cursor);
+    const rest = s.queue.slice(s.cursor).filter((c) => c.tier !== Q.TIER.NEW || c.answered);
+    // 收尾：闸门关掉后，"cursor 之后已答过的卡"也切掉。
+    // 它们永远排不到（cursor 只前进），却让 queue.length 虚高，
+    // 界面上的"本轮还剩多少"就会骗人 —— 实测确实剩下 5 张这种卡。
+    const tailIdx = rest.findIndex((c) => c.answered);
+    s.queue = tailIdx >= 0 ? [...head, ...rest.slice(0, tailIdx)] : [...head, ...rest];
+    const removed = before - s.queue.length;
+    if (removed > 0) {
+      // plannedSize 必须跟着队列走。它原本在会话创建时固定为 queue.length，
+      // 而同轮重训（忘了 → 同轮再来一次，§5.5）会往队列里插新卡，
+      // 于是"本轮总量"长期偏小：实测重背时实际要过 4 张卡，环却写 1/1，
+      // 看起来这一轮已经完了。宁大不小，所以取 max。
+      s.plannedSize = Math.max(s.plannedSize || 0, s.queue.length);
+      // 容器统计跟着真实队列走：界面上的"新词"数量不能继续显示已经撤掉的那些
+      if (state.container?.stats) {
+        const remainingNew = s.queue.filter((c) => c.tier === Q.TIER.NEW && !c.answered).length;
+        state.container = {
+          ...state.container,
+          stats: { ...state.container.stats, newCount: remainingNew },
+        };
+      }
+    }
+    return removed;
   }
 
   function next() {
@@ -392,11 +590,16 @@ export function createApp(ports = {}) {
     const todayRecs = state.records.filter((r) => r.dayKey === state.dayKey);
     const total = Math.max(1, todayRecs.length);
     const correct = todayRecs.filter((r) => r.correct).length;
+    // 今日新词作答数：只数 tier 3（新词）且当天已作答的记录。
+    // 用户抱怨"我抽空背了几个词却看不到"，就是缺这个数 —— 它一直在
+    // todayStats() 里算着，只是从没挂到界面上。
+    const todayNewCount = todayRecs.filter((r) => r.tier === 3).length;
     return {
       conquered, // 「已收服 N 词」取代「掌握度 x%」（§7.5 证据①）
       learned,
       totalWords: state.words.length,
       todayAnswered: todayRecs.length,
+      todayNewCount,
       todayAccuracy: correct / total,
       level: G.levelFor(state.exp),
       heatmap: heatmap(),
@@ -634,6 +837,9 @@ export function createApp(ports = {}) {
     },
     raw: state,
     buildContainer,
+    restartRound,
+    extendRound,
+    allowMoreNew,
     rate,
     next,
     undo,
@@ -652,7 +858,18 @@ export function createApp(ports = {}) {
     hookFor,
     hookPeek,
     refresh: () => {
-      state.dayKey = Q.dayKey(now());
+      const key = Q.dayKey(now());
+      // 跨天：新的一天要重新排容器，「自己往后背」的加量次数和本轮卡组也跟着重置。
+      // 不重置的话，昨天点了 3 次加量会让今天一开场就是 N+15。
+      if (key !== state.dayKey) {
+        state.extendCount = 0;
+        state.roundItems = null;
+        state.dayKey = key;
+        state.container = null;
+        buildContainer();
+        return;
+      }
+      state.dayKey = key;
       state.container = state.container ? { ...state.container } : null;
       emit();
     },
