@@ -116,7 +116,7 @@ export function renderProgress(root, state, app) {
   );
 }
 
-function heatmap(days) {
+export function heatmap(days) {
   const cols = [];
   for (let w = 0; w < Math.ceil(days.length / 7); w++) {
     const col = el('div', { class: 'col' });

@@ -256,9 +256,14 @@
  *      徽章贴上边、按钮贴下边，中间约 180px 悬空，
  *      看起来"内容浮在面板中间"，上下都不透气。
  *
- * 正确做法：把卡片高度**收到内容附近**（max-height 给个上限），
- * 再让卡片整体在可用高度里垂直居中。这样内容聚成一块，
- * 空白平均分到上下两边，读起来是"留白"而不是"塌了"。
+ * 第二版（当前）：上一版是"把卡片收小 + 整体居中"，也就是给 max-height 一个上限
+ * 再用 margin-top/bottom:auto 把剩余空间平均分到卡片上下。
+ * 那是"塌在顶部"的修法，但它在**高瘦面板**里失效了：实测 450x1032 的面板中
+ * 卡片只占 31% 高度，上下各有 30% / 25% 的空白，看起来是"中间一小块、上下全空"。
+ *
+ * 现在改成：**卡片自己吃掉可用高度**（flex:1），把空间分到卡片**内部**各块之间。
+ * 这样既没有卡片外的空洞，内容也不会挤成一团。
+ * 卡片内部再按区块分配，而不是靠外面的 auto margin 撑。
  */
 .vs-panel.docked .vs-body { display: flex; flex-direction: column; }
 /*
@@ -282,17 +287,125 @@
 .vs-panel.docked .vs-card {
   display: flex;
   flex-direction: column;
-  /* 内容高度 + 一点余量；超长内容（词义/例句展开后）仍能滚动 */
-  max-height: min(460px, 100%);
-  margin-top: auto; /* 上下平分剩余空间 → 整块垂直居中 */
-  margin-bottom: auto;
+  /* 卡片自己吃掉可用高度 —— 空间留在卡片内部，不在卡片外面。
+     不再设 max-height：那是上一版"收小 + 居中"留下的坑（见上面注释）。 */
+  flex: 1 1 auto;
   min-height: 0;
+  /* 内部留白由内边距给，不靠外部 auto margin */
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 /*
- * 注意这里**不要**给 #vs-stage 或 .vs-actions 加 flex:1 / margin-top:auto：
- * 那会把卡片内剩余空间全塞到中间或底部，又变成"内容被抻开"。
- * 卡片高度已经收到内容附近了，内部按正常文档流排即可。
+ * 卡片内部：把空间分到各块之间。
+ *
+ * 为什么不用 flex:1 分块：那会把某一块（比如 #vs-stage）抻成一大片，
+ * 内容位置被拉散，也是"看着像没做完"。这里改成**可控的垂直间距**：
+ * 单词与音标之间收紧，其余各块之间给固定档位的空隙，
+ * 最后让评分按钮沉到底部 —— 拇指够得到的位置（§5）。
  */
+.vs-panel.docked .vs-card > .vs-badges { margin-bottom: 2px; }
+.vs-panel.docked .vs-card > .vs-headline { margin-bottom: 10px; }
+.vs-panel.docked .vs-card > .vs-word { margin-bottom: 2px; }
+.vs-panel.docked .vs-card > .vs-ipa { margin-bottom: 12px; }
+/*
+ * 余量怎么分（试错记录，别重犯）：
+ *   v1  全给 actions 的 margin-top:auto
+ *       → 800px 卡片里约 625px 空隙集中在按钮上方一处
+ *   v2  让 #vs-stage 吸收（flex:1）
+ *       → stage 涨到 574px，"一行提示语浮在一大片留白中间"，更糟
+ *   v3  两端各 auto（actions margin-top/bottom:auto）
+ *       → 视觉检查判定 4/10：**卡片内部中间被挖出约 30% 的死区**，
+ *         比原问题更难看。数据（FILL=83.8%）好看，但数据不等于观感。
+ *   v4（当前）
+ *       → 承认一件事：停靠面板里内容本来就不该被抻满 800px。
+ *         正确解不是"让卡片长满"，而是"让长高的那部分有用途"：
+ *         · #vs-stage 吸收余量 —— 它在**揭晓后**要放词义/例句，
+ *           本来就需要更多高度；现在空态它只是多留白，展开后被真正用上
+ *         · 评分按钮沉到底部拇指区，不再独占余量、也不产生中间死区
+ *         · 板块之间用固定档位间距，避免"上紧下松"的怪比例
+ */
+.vs-panel.docked .vs-card > #vs-stage {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin-bottom: 12px;
+  /* 提示语靠上放，余量留在它下方 —— 展开词义时这块正好被填满 */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.vs-panel.docked .vs-card > .vs-actions { margin-top: 0; }
+
+/*
+ * ── 数据带（.vs-deck）────────────────────────────────────────
+ * 为什么有它：停靠面板实测 956px 高，而一张卡的内容只有约 200px。
+ * 试过把卡片抻满（见上面 v1–v3 的记录），数字好看但观感更差 ——
+ * "空"不是间隙分布问题，是**真正可看的内容不够**。
+ * 所以这里用本来就存在的数据（stats.conquered / stubborn / heatmap /
+ * container 进度）把下面那块填成有用的东西，而不是继续调配空白。
+ *
+ * 视觉约束（§11）：靠留白与字重，不用色块与边框线。
+ * 唯一的线是一条极淡的分隔，用来把"当前这张卡"和"累计态势"分开。
+ */
+.vs-deck { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--vs-line-soft); }
+/*
+ * 数据带沉到卡片底部，并且**自己吃掉剩余高度**。
+ *
+ * 实测（450x1032，卡片 800px）：deck 只占 160px 时，
+ * 卡片顶部内容（badges+headline+word+ipa+stage+actions ≈ 190px）
+ * 和数据带之间留着约 389px 空白 —— 等于又把空洞搬进了卡片内部。
+ *
+ * 所以：deck 设 flex:1（吃掉剩余），内部内容贴底对齐。
+ * 空白就变成"当前这张卡 → 留白 → 累计态势"的有意分层，
+ * 而不是一块没人管的空隙。
+ */
+.vs-panel.docked .vs-card > .vs-deck {
+  margin-top: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.vs-deck-top { display: flex; align-items: center; gap: 16px; }
+.vs-ringwrap { flex: 0 0 auto; width: 68px; height: 68px; display: block; }
+.vs-ring { width: 68px; height: 68px; display: block; }
+.vs-ring .track { fill: none; stroke: var(--vs-line-soft); stroke-width: 3.5; }
+.vs-ring .arc {
+  fill: none; stroke: var(--vs-jade); stroke-width: 3.5; stroke-linecap: round;
+  transform: rotate(-90deg); transform-origin: 24px 24px;
+  transition: stroke-dashoffset .3s ease;
+}
+.vs-ring .pct {
+  fill: var(--vs-ink); font-size: 12.5px; font-weight: 600;
+  font-family: var(--vs-mono); text-anchor: middle; dominant-baseline: central;
+}
+.vs-kpis { display: flex; gap: 26px; flex-wrap: wrap; min-width: 0; align-items: center; }
+.vs-kpi { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vs-kpi b {
+  font-family: var(--vs-mono); font-size: 21px; font-weight: 600;
+  color: var(--vs-ink); letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12ch;
+}
+.vs-kpi i { font-style: normal; font-size: 11.5px; color: var(--vs-ink-faint); }
+.vs-deck-heat { margin-top: 16px; }
+.vs-deck-heat .lbl { display: block; font-size: 11.5px; color: var(--vs-ink-faint); margin-bottom: 7px; }
+.vs-deck-heat .vs-heat { margin-top: 0; gap: 5px; }
+.vs-deck-heat .vs-heat .col { gap: 5px; }
+.vs-deck-heat .vs-heat .cell { width: 17px; height: 17px; border-radius: 3px; }
+/*
+ * 矮面板降级两档。浮动卡是 position:absolute + max-height:min(64vh,560px)，
+ * 塞进整套数据带会把它撑到要滚动（实测 360x760 下卡片 501px、数据带占 271px＝55%）。
+ * 宁可少给，不要挤。
+ */
+@media (max-height: 900px) {
+  .vs-deck-heat { display: none; }
+  .vs-ringwrap, .vs-ring { width: 54px; height: 54px; }
+  .vs-kpi b { font-size: 17px; }
+  .vs-kpi i { font-size: 11px; }
+}
+@media (max-height: 640px) {
+  .vs-kpi { display: none; }
+}
 
 /*
  * 轴统一：标签栏、正文、底栏都要落在同一条左基准线上。
@@ -330,7 +443,16 @@
 .vs-badge[data-kind="personal"] { color: var(--vs-warm-text); }
 
 .vs-word {
-  font-size: 27px; font-weight: 600; letter-spacing: -.01em;
+  /*
+   * 字号随面板高度放大。
+   *
+   * 为什么：原来是写死的 27px。在 800px 高的停靠面板里，一个 27px 的单词
+   * 撑不起那么大一块地方，看着空 —— 空的不只是间隙，是内容本身太小。
+   * clamp 下限 27px 保持原设计意图（窄侧栏/浮卡不变），上限 52px，
+   * 按视口高度平滑过渡。vs-tiny 那套覆盖规则在下面，优先级更高。
+   */
+  font-size: clamp(27px, 3.4vh + 12px, 52px);
+  font-weight: 600; letter-spacing: -.01em;
   cursor: pointer; display: inline-flex; align-items: baseline; gap: 8px;
   border: 0; background: transparent; padding: 0; color: inherit;
   font-family: var(--vs-serif); text-align: left; line-height: 1.25;
@@ -795,7 +917,7 @@ body { margin: 0; background: #14120F; }
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-09T11:08:39
+ * 构建时间：2026-10-09T11:51:23
  */
 'use strict';
 
@@ -5172,7 +5294,6 @@ function renderProgress(root, state, app) {
     el('div', { class: 'vs-sub', style: { marginTop: '14px' } , text: `词力值 ${stats.level.exp} · ${stats.level.level} 级 ${stats.level.name}` }),
   );
 }
-
 function heatmap(days) {
   const cols = [];
   for (let w = 0; w < Math.ceil(days.length / 7); w++) {
@@ -5481,7 +5602,7 @@ function renderWeeklyReport(root, report) {
   );
 }
 
-return { injectCore, renderProgress, renderVocab, renderSettings, renderWeeklyReport };
+return { injectCore, renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap };
 })();
 
 // ═══════════ ui/panel.mjs → UI_PANEL ═══════════
@@ -5496,6 +5617,7 @@ const renderProgress = VOCAB_CORE.UI_PAGES.renderProgress;
 const renderVocab = VOCAB_CORE.UI_PAGES.renderVocab;
 const renderSettings = VOCAB_CORE.UI_PAGES.renderSettings;
 const renderWeeklyReport = VOCAB_CORE.UI_PAGES.renderWeeklyReport;
+const heatmap = VOCAB_CORE.UI_PAGES.heatmap;
 // vocab-study / ui / panel.mjs
 // 学习面板：今日 / 进度 / 生词本 / 设置。
 //
@@ -5742,7 +5864,80 @@ function createPanel(app, ctx = {}) {
     wrap.appendChild(el('div', { class: 'vs-ipa', id: 'vs-ipa' }));
     wrap.appendChild(el('div', { id: 'vs-stage' }));
     wrap.appendChild(el('div', { class: 'vs-actions', id: 'vs-actions' }));
+    // 真实数据带：停靠面板很高（实测 956px），而一张卡的内容只有约 200px。
+    // 与其把卡片硬抻满（试过，视觉检查 4/10，中间被挖出死区），
+    // 不如用**本来就存在的数据**把下面这块填成有用的东西。
+    // 它不是卡片的一部分，所以换词时不重建，只在 updateCard 里刷新。
+    const deck = el('div', { class: 'vs-deck', id: 'vs-deck' });
+    wrap.appendChild(deck);
     return wrap;
+  }
+
+  // ── 数据带：环形进度 + 真实指标 + 热力图 ──────────────────────
+  //
+  // 三块都用 app.state 里已有的字段，不新造数字：
+  //   · 环：今日已答 / 本批计划数（st.container.done / containerSize）
+  //   · 收服词数：stats.conquered
+  //   · 最顽固的一个词：stats.stubborn[0]（错 e 次）
+  //   · 热力图：stats.heatmap（有学就着色，空白的日子什么也不说）
+  // 环形进度：用模板字符串 + innerHTML，跟 pages.mjs 的 curveSvg 同一套做法。
+  //
+  // 为什么不用 document.createElementNS：测试环境是轻量 DOM 桩，
+  // 没有 createElementNS（实测 demo-boot 直接 TypeError 挂掉）。
+  // innerHTML 两边都支持，字符串拼装也更短。
+  function ringSvg(pct, label) {
+    const R = 20;
+    const C = 2 * Math.PI * R;
+    const off = C * (1 - Math.max(0, Math.min(1, pct)));
+    return (
+      `<svg class="vs-ring" viewBox="0 0 48 48" aria-hidden="true">` +
+      `<circle class="track" cx="24" cy="24" r="${R}"/>` +
+      `<circle class="arc" cx="24" cy="24" r="${R}" ` +
+      `stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>` +
+      `<text class="pct" x="24" y="24">${label}</text>` +
+      `</svg>`
+    );
+  }
+
+  function updateDeck(host, st) {
+    const deck = host.querySelector('#vs-deck');
+    if (!deck) return;
+    const stats = st.stats || {};
+    const done = st.container?.done ?? 0;
+    const size = st.container?.stats?.containerSize ?? 0;
+    const pct = size ? Math.min(1, done / size) : 0;
+
+    const kpis = [];
+    kpis.push(el('span', { class: 'vs-kpi' }, [
+      el('b', { text: String(stats.conquered ?? 0) }),
+      el('i', { text: '词已收服' }),
+    ]));
+    const top = stats.stubborn && stats.stubborn[0];
+    if (top && top.w) {
+      kpis.push(el('span', { class: 'vs-kpi' }, [
+        el('b', { text: top.w.word }),
+        el('i', { text: `错 ${top.e} 次` }),
+      ]));
+    } else if (stats.level) {
+      kpis.push(el('span', { class: 'vs-kpi' }, [
+        el('b', { text: stats.level.name || String(stats.level.level) }),
+        el('i', { text: `${stats.level.exp} 词力` }),
+      ]));
+    }
+
+    const parts = [
+      el('div', { class: 'vs-deck-top' }, [
+        el('div', { class: 'vs-ringwrap', html: ringSvg(pct, size ? `${Math.min(done, size)}/${size}` : '—') }),
+        el('div', { class: 'vs-kpis' }, kpis),
+      ]),
+    ];
+    if (stats.heatmap && stats.heatmap.length) {
+      parts.push(el('div', { class: 'vs-deck-heat' }, [
+        el('span', { class: 'lbl', text: '这半个月' }),
+        heatmap(stats.heatmap),
+      ]));
+    }
+    mount(deck, parts);
   }
 
   function updateCard(host, st, card, fresh) {
@@ -5794,6 +5989,9 @@ function createPanel(app, ctx = {}) {
         renderActions(actions, st, card, true);
       }
     }
+
+    // 数据带跟卡片一起刷新（它用的都是 st.stats 里的真实累计值）
+    updateDeck(host, st);
   }
 
   /** 正面：只给单词 + 音标。词性也藏起来（词性给答案暗示 —— §5.2）。 */

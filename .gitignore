@@ -14,6 +14,9 @@ __pycache__/
 /_*.json
 /_*.html
 /_*.css
+/_*.png
+# 截图/测量用的临时页面目录
+/_pages/
 
 # 安装器的备份（本机状态，不该进仓库）
 .dsh-install-backup/

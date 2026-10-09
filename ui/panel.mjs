@@ -10,7 +10,7 @@
 // 并写入 DP 模型 —— 静默污染学习记录。
 
 import { el, mount, clear, setText, focusSelf, prefersReducedMotion } from './dom.mjs';
-import { renderProgress, renderVocab, renderSettings, renderWeeklyReport } from './pages.mjs';
+import { renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap } from './pages.mjs';
 
 const TABS = [
   ['today', '今日'],
@@ -247,7 +247,80 @@ export function createPanel(app, ctx = {}) {
     wrap.appendChild(el('div', { class: 'vs-ipa', id: 'vs-ipa' }));
     wrap.appendChild(el('div', { id: 'vs-stage' }));
     wrap.appendChild(el('div', { class: 'vs-actions', id: 'vs-actions' }));
+    // 真实数据带：停靠面板很高（实测 956px），而一张卡的内容只有约 200px。
+    // 与其把卡片硬抻满（试过，视觉检查 4/10，中间被挖出死区），
+    // 不如用**本来就存在的数据**把下面这块填成有用的东西。
+    // 它不是卡片的一部分，所以换词时不重建，只在 updateCard 里刷新。
+    const deck = el('div', { class: 'vs-deck', id: 'vs-deck' });
+    wrap.appendChild(deck);
     return wrap;
+  }
+
+  // ── 数据带：环形进度 + 真实指标 + 热力图 ──────────────────────
+  //
+  // 三块都用 app.state 里已有的字段，不新造数字：
+  //   · 环：今日已答 / 本批计划数（st.container.done / containerSize）
+  //   · 收服词数：stats.conquered
+  //   · 最顽固的一个词：stats.stubborn[0]（错 e 次）
+  //   · 热力图：stats.heatmap（有学就着色，空白的日子什么也不说）
+  // 环形进度：用模板字符串 + innerHTML，跟 pages.mjs 的 curveSvg 同一套做法。
+  //
+  // 为什么不用 document.createElementNS：测试环境是轻量 DOM 桩，
+  // 没有 createElementNS（实测 demo-boot 直接 TypeError 挂掉）。
+  // innerHTML 两边都支持，字符串拼装也更短。
+  function ringSvg(pct, label) {
+    const R = 20;
+    const C = 2 * Math.PI * R;
+    const off = C * (1 - Math.max(0, Math.min(1, pct)));
+    return (
+      `<svg class="vs-ring" viewBox="0 0 48 48" aria-hidden="true">` +
+      `<circle class="track" cx="24" cy="24" r="${R}"/>` +
+      `<circle class="arc" cx="24" cy="24" r="${R}" ` +
+      `stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>` +
+      `<text class="pct" x="24" y="24">${label}</text>` +
+      `</svg>`
+    );
+  }
+
+  function updateDeck(host, st) {
+    const deck = host.querySelector('#vs-deck');
+    if (!deck) return;
+    const stats = st.stats || {};
+    const done = st.container?.done ?? 0;
+    const size = st.container?.stats?.containerSize ?? 0;
+    const pct = size ? Math.min(1, done / size) : 0;
+
+    const kpis = [];
+    kpis.push(el('span', { class: 'vs-kpi' }, [
+      el('b', { text: String(stats.conquered ?? 0) }),
+      el('i', { text: '词已收服' }),
+    ]));
+    const top = stats.stubborn && stats.stubborn[0];
+    if (top && top.w) {
+      kpis.push(el('span', { class: 'vs-kpi' }, [
+        el('b', { text: top.w.word }),
+        el('i', { text: `错 ${top.e} 次` }),
+      ]));
+    } else if (stats.level) {
+      kpis.push(el('span', { class: 'vs-kpi' }, [
+        el('b', { text: stats.level.name || String(stats.level.level) }),
+        el('i', { text: `${stats.level.exp} 词力` }),
+      ]));
+    }
+
+    const parts = [
+      el('div', { class: 'vs-deck-top' }, [
+        el('div', { class: 'vs-ringwrap', html: ringSvg(pct, size ? `${Math.min(done, size)}/${size}` : '—') }),
+        el('div', { class: 'vs-kpis' }, kpis),
+      ]),
+    ];
+    if (stats.heatmap && stats.heatmap.length) {
+      parts.push(el('div', { class: 'vs-deck-heat' }, [
+        el('span', { class: 'lbl', text: '这半个月' }),
+        heatmap(stats.heatmap),
+      ]));
+    }
+    mount(deck, parts);
   }
 
   function updateCard(host, st, card, fresh) {
@@ -299,6 +372,9 @@ export function createPanel(app, ctx = {}) {
         renderActions(actions, st, card, true);
       }
     }
+
+    // 数据带跟卡片一起刷新（它用的都是 st.stats 里的真实累计值）
+    updateDeck(host, st);
   }
 
   /** 正面：只给单词 + 音标。词性也藏起来（词性给答案暗示 —— §5.2）。 */
