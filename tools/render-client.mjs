@@ -140,8 +140,26 @@ const fakeReact = {
     stateLog.push(v);
     return [v, () => {}];
   },
-  useEffect() {},
-  useLayoutEffect() {},
+  // ⚠️ 这里原来是 `useEffect() {}` —— **空的**。
+  //
+  // 后果非常严重，必须记下来：插件真正的挂载逻辑全在 useEffect 里
+  // （adapter/dsh/client.js 的 usePuppet：`React.useEffect(() => {
+  // puppetRef.current = createRef.current(hostEl) })`）。effect 不跑，
+  // 面板根本不会被创建 —— 于是这个脚本永远报"渲染通过"，
+  // 而真机上用户看到的是一片黑。
+  //
+  // 2026-10-09 我就是拿它当"插件没崩"的证据，一口咬定不是自己的问题，
+  // 结果查了一整晚。**用有缺陷的测试台去证明自己清白，结论必然是错的。**
+  //
+  // 现在真的把 effect 执行掉。副作用是：puppet 会真的去挂 DOM，
+  // 而这里的 document 是手写桩 —— 所以它报出的错要区分
+  // 「真 bug」和「桩不够用」，不能一律当失败看。
+  useEffect: (fn, deps) => {
+    effects.push({ fn, deps });
+  },
+  useLayoutEffect: (fn, deps) => {
+    effects.push({ fn, deps });
+  },
   useRef: (v) => ({ current: v }),
   useMemo: (f) => f(),
   useCallback: (f) => f,
@@ -151,6 +169,7 @@ const fakeReact = {
   useContext: () => ({}),
   cloneElement: (x) => x,
 };
+const effects = [];
 
 const mod = captured.factory((id) => {
   if (id === 'react') return fakeReact;
@@ -203,6 +222,29 @@ for (const c of comps) {
 // 逐个真的调用一遍（等价于 React 渲染它）
 console.log('\n  ── 逐个渲染 ──');
 let failed = 0;
+let stubOnly = 0;
+/**
+ * 区分「真 bug」和「手写 DOM 桩不够用」。
+ *
+ * 这个区分是被迫学会的：stubEl 没实现 `append`（只有 appendChild），
+ * 于是每个 puppet 都会抛 "root.append is not a function" —— 而真浏览器
+ * 里这行完全正常（tools/_vs-harness 那套真 DOM 台子实测 errors=0）。
+ *
+ * 但**不能**因此把 effect 的报错一律忽略：Q.shouldBlockNew 那次就是
+ * 在 effect 里炸的，忽略它等于把这个台子重新变成摆设。
+ * 所以只把"明显是桩缺方法"的那几种放行，其余照旧算失败。
+ */
+const STUB_ONLY = [
+  /\.append is not a function/,
+  /\.prepend is not a function/,
+  /\.remove is not a function/,
+  /\.closest is not a function/,
+  /\.matches is not a function/,
+  /getBoundingClientRect is not a function/,
+  /matchMedia is not a function/,
+  /ResizeObserver is not defined/,
+];
+const isStubOnly = (err) => STUB_ONLY.some((re) => re.test(err.message || ''));
 for (const c of comps) {
   const label = `${c.meta.name}${c.meta.key ? '[' + c.meta.key + ']' : ''}`;
   if (typeof c.comp !== 'function') {
@@ -211,6 +253,7 @@ for (const c of comps) {
   }
   try {
     const before = stateLog.length;
+    effects.length = 0;
     const out = c.comp({ sessionId: 'sess-test', tabId: 'tab-test' });
     console.log(
       `    ✓ ${label}: 渲染通过（useState 调用 ${stateLog.length - before} 次）`,
@@ -218,6 +261,31 @@ for (const c of comps) {
     // 看返回的树里有没有明显的空
     const dump = JSON.stringify(out, (k, v) => (typeof v === 'function' ? '[fn]' : v));
     console.log(`        树长度 ${dump.length}`);
+
+    // ── 现在真的把 effect 跑掉（这一段是这次修的）──
+    // 挂载逻辑全在这里；不跑它，"渲染通过"只是空话。
+    for (let i = 0; i < effects.length; i++) {
+      try {
+        effects[i].fn();
+        console.log(`        effect#${i} 执行通过`);
+      } catch (err) {
+        if (isStubOnly(err)) {
+          stubOnly++;
+          console.log(`        ○ effect#${i} 撞上手写 DOM 桩的缺口（非产品问题）: ${err.message}`);
+          continue;
+        }
+        failed++;
+        console.log(`        ✗ effect#${i} 抛错: ${err.constructor.name}: ${err.message}`);
+        console.log(
+          (err.stack || '')
+            .split('\n')
+            .slice(1, 6)
+            .map((l) => '            ' + l.trim())
+            .join('\n'),
+        );
+      }
+    }
+    if (!effects.length) console.log('        （没有 effect —— 挂载逻辑没被执行，这个结论不算数）');
   } catch (err) {
     failed++;
     console.log(`    ✗ ${label}: ${err.constructor.name}: ${err.message}`);
@@ -230,5 +298,12 @@ for (const c of comps) {
     );
   }
 }
-console.log(failed ? `\n  有 ${failed} 个组件渲染抛错` : '\n  全部组件渲染通过');
+console.log(
+  failed
+    ? `\n  有 ${failed} 处真报错（渲染或 effect）`
+    : '\n  渲染 + effect 全部通过',
+);
+if (stubOnly) {
+  console.log(`  （另有 ${stubOnly} 处是手写 DOM 桩缺方法，不是产品问题；真 DOM 验证见 tools/ 的浏览器台子）`);
+}
 process.exitCode = failed ? 1 : 0;
