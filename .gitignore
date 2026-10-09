@@ -8,6 +8,12 @@ __pycache__/
 *.log
 *.bak
 *.orig
+# 我自己在根目录随手写的临时脚本/产物，一律不进仓库
+/_*.py
+/_*.txt
+/_*.json
+/_*.html
+/_*.css
 
 # 安装器的备份（本机状态，不该进仓库）
 .dsh-install-backup/
