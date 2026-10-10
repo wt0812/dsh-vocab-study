@@ -8,7 +8,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 ## 它长什么样
 
-**① 输入框旁那颗胶囊**（`conversation.input.right`，排在输入框右侧控件的最右边）：
+**① 输入框旁那颗胶囊**（`conversation.input.right`，排在「权限」与「模型」之间）：
 
 ![输入框旁的胶囊](assets/screenshot-1-capsule.png)
 
@@ -18,7 +18,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 位置 | 内容 |
 |---|---|
-| `conversation.input.right` | 一颗胶囊 `今天第一词`，排在输入框右侧控件的最右边（`order = 45`，大于右侧切换器的 40） |
+| `conversation.input.right` | 一颗胶囊 `今天第一词`，排在「权限」与「模型」之间 |
 | `sidebar.right.pane.tab` | 一个叫「今日背单词」的标签页，四个页签：今日 / 进度 / 生词本 / 设置 |
 
 > **截图**：上面两张图就在 `assets/` 里（`screenshot-1-capsule.png`、`screenshot-2-panel.png`），
@@ -72,6 +72,7 @@ start demo\index.html
 | `preview-progress.html` | 截到「进度」页 |
 | `preview-settings.html` | 截到「设置」页 |
 | `preview-vocab.html` | 截到「生词本」页 |
+| `preview-hook.html` | 截到「记忆钩子」相关态 |
 
 `preview*.html` 只是为了截图/看态方便，它们会在打开后自动点开对应页签。
 
@@ -87,11 +88,30 @@ dsh plugin --profile web add github:wt0812/dsh-vocab-study
 
 装完 **完全退出 DeepSeek Harness 再打开**（`cordis.patch.yml` 是启动时读的，刷新页面没用）。
 
-`web` 换成你自己的 profile 名即可（桌面版默认是 `desktop`）：
+**但请注意 profile 要选对，否则「装了没反应」。** DSH 是按 profile 分目录装插件的，
+装错 profile 等于装进了另一个平行世界：
+
+| 你在用哪个界面 | 该用哪个 profile |
+|---|---|
+| **桌面客户端**（Electron 那个 app） | `desktop` |
+| 浏览器里的 Web 界面 | `web` |
+
+所以桌面客户端用户请这样装（把 `web` 换成 `desktop`）：
 
 ```sh
 dsh plugin --profile desktop add github:wt0812/dsh-vocab-study
 ```
+
+> 依据（读的是 DSH 本体的启动器，不是猜的）：`PROFILE_TEMPLATES` 里只有
+> `acp` / `web` / `headless` / `sdk` / `sdk-minimal`，**没有 `desktop`**；
+> 而桌面应用的启动器里写的是
+> `runProfile({ profile: "desktop", ... })`，注释是
+> *"Launch the Desktop profile through the Web application"* ——
+> 也就是说桌面版**用的是 Web 应用的实现、但 profile 名叫 `desktop`**，
+> 并且它的端口是 19387。
+>
+> 市场目录里 4481 条清的 install 命令**全部**是 `--profile web`，
+> 那是给浏览器场景的默认值，不等于桌面客户端该用的值。
 
 **不需要 npm、不需要构建、不需要 Python。** `lib/` 里的产物已经提交进仓库，`dsh plugin` 走的是 profile 目录里的 pnpm，装完就能用。
 
@@ -323,6 +343,7 @@ node test/client-activation.test.mjs
 node test/bundle-audit.test.mjs
 node test/mount.test.mjs
 node test/round-control.test.mjs
+node test/multi-conversation.test.mjs
 ```
 
 | 测试 | 覆盖什么 | 当前 |
@@ -388,7 +409,7 @@ $env:VS_DUMP=1; node test/demo-boot.test.mjs   # 打印外壳 DOM 树与关键�
 
 ## 12 条硬约束
 
-规格（`../VOCAB-STUDY-SPEC.md`）里的顶层原则，实现时当成不可协商的约束：
+下面这些是设计规格里的顶层原则（那份规格不在本仓库里，它写在开发时的工作目录中），实现时当成不可协商的约束：
 
 | # | 约束 | 怎么落地的 |
 |---|---|---|
@@ -1306,7 +1327,7 @@ function useCore() { ... }        // 座席用它；异步就绪，先渲染空�
 ## 目录速查
 
 ```
-VOCAB-STUDY-SPEC.md     规格（在上一层目录）
+VOCAB-STUDY-SPEC.md     设计规格（不在本仓库里，写在做它时的上一层目录）
 package.json            dsh.bundle.patch / dsh.client.platform 在这里
 cordis.patch.yml        host 一行条目（不注册服务）
 core/  store/  ui/  adapter/dsh/    源码

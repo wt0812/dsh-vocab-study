@@ -2,7 +2,8 @@
 
 目标：[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) —— `dsh-market` 插件读的目录
 （`https://awesome-dsh-plugin.com/plugins.json`）。**这不是 DeepSeek 官方市场，社区维护。**
-实测该目录当前有 4460 条条目，其中 1943 条是用 `github:` 形态安装的。
+实测该目录当前有 **4481 条**条目，其中 **1943 条**是用 `github:` 形态安装的
+（2026-10-10 实测；这两个数会随时间漂，用之前重新数一遍）。
 
 ---
 
@@ -38,28 +39,38 @@ node tools/verify-market-entry.mjs <一个装了 js-yaml 的目录>
 
 ---
 
-## 第 1 步：推送仓库
+## 实际过程（已完成，留作记录）
 
-```sh
-cd "F:\DeepSeek Harness\projects\vocab-study"
-git remote add origin https://github.com/wt0812/dsh-vocab-study.git
-git push -u origin main
-```
+1. **建仓库并推送** —— `wt0812/dsh-vocab-study`（公开、MIT），加了 `dsh-plugin` topic。
+2. **等满 1 天** —— 创建于 `2026-10-09T03:15:29Z`，CI 要求 ≥ 1 天，满足。
+3. **提 PR** —— [awesome-dsh-plugin#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043)，
+   分支 `wt0812:add-dsh-vocab-study` → `awesome-dsh-plugin:main`，**只加 1 个文件 +6 行**。
+   用的是 `_submit.py`（本机脚本，未进仓库）：克隆 fork → 加条目 → 推分支 → `gh pr create`。
+4. **CI** —— `check` 与 `Submission gate` 双绿，gate 原文：
+   *"All 1 submitted entry passes: `dsh.bundle` declared, repo old enough, enough commits."*
 
-**先在 GitHub 网页上建一个空仓库** `wt0812/dsh-vocab-study`（不要勾选 Add README / .gitignore / license，
-否则会和本地历史冲突）。建完立刻加上 topic **`dsh-plugin`**。
+> ⚠️ **别重提**：上游在 pr-gate 里写明年龄门槛会自动清除，不需要 resubmit / push / close & reopen。
+> 现在只等人工复核，合了之后才会出现在目录里。
+
+**关于 `--profile`：这是最容易搞错的一处。**
+DSH 按 profile 分目录装插件，装错等于装进另一个平行世界：
+
+| 界面 | 该用哪个 profile |
+|---|---|
+| 桌面客户端（Electron app） | `desktop` |
+| 浏览器里的 Web 界面 | `web` |
+
+市场目录里 4481 条的 install 命令**全是 `--profile web`**（那是给浏览器场景的默认值）。
+而我们这个仓库的开发与实测环境是**桌面客户端**，所以本机用的是 `profiles/desktop`。
+依据是 DSH 本体启动器里的 `runProfile({ profile: "desktop", ... })`
+（注释：*Launch the Desktop profile through the Web application*），
+而 `PROFILE_TEMPLATES` 里只有 `acp` / `web` / `headless` / `sdk` / `sdk-minimal`，**没有 `desktop`**。
 
 ---
 
-## 第 2 步：等满 1 天
+## 条目长什么样
 
-CI 检查仓库创建时间必须 ≥ 1 天。推送完成后第二天再提 PR。
-
----
-
-## 第 3 步：提 PR
-
-Fork + 分支，**只加一个文件** `data/plugins/wt0812__dsh-vocab-study.yml`：
+**只加一个文件** `data/plugins/wt0812__dsh-vocab-study.yml`：
 
 ```yaml
 url: https://github.com/wt0812/dsh-vocab-study
@@ -76,7 +87,7 @@ description:
 - `url` 必须与仓库完全一致。
 - 只有 `description.en` 必填。
 - **描述里含 `: ` 必须加引号**，否则 YAML 把它当嵌套键解析失败。
-  实测该目录 4460 条里有 2477 条的英文描述含 `": "`，这是高频踩坑点。
+  实测 4481 条里有 **2491 条**的英文描述含 `": "`（2026-10-10 数），这是高频踩坑点。
 - 一个 PR 最多 3 条。
 - **不要**手工编辑仓库的两个 README（它们是生成物）；**不要**手写 `npm:` 字段（会被校验拒绝）。
 - 不要改这个仓库除自己条目文件以外的任何东西。
