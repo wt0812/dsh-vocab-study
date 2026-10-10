@@ -232,7 +232,80 @@ DRIVER = r"""
         var k = document.querySelectorAll('.vs-kpi');
         return k.length ? String(k[0].textContent) : null;
       })() });
-      out(); return;
+      phase = 'coll1'; setTimeout(step, 80); return;
+    }
+
+    // ── 换词库：用户报「背完一轮后点换词库，显示更换成功但主页没反应」──
+    // 这条路要真的走界面：点「换词库」→ 设置页 → 改下拉框 → 回「今日」看有没有词。
+    // 光看代码看不出这个 bug：updateSettings({collections:[...]}) 语法完全正确，
+    // 只是它压根不重建队列、也不重新加载词表。
+    if (phase === 'coll1'){
+      // ⚠️「换词库」按钮只在**走完一轮**那个界面出现（空状态 / 本轮结束）。
+      //    此刻界面还停在词卡上（前面「我还是想继续」刚放行了一批新词），
+      //    所以先真的把这一轮背完，否则 findBtn('换词库') 找不到 ——
+      //    我第一次就是这么写的，两条断言直接假红。
+      if (document.querySelector('#vs-card') && !app.state.roundFinished){
+        finishRound(app);
+      }
+      var todayTab = findBtn('今日');
+      if (todayTab) click(todayTab);
+      setTimeout(function(){
+        var swap = findBtn('换词库');
+        results.push({ step: '今日页上找得到「换词库」入口', found: !!swap,
+                       roundFinished: app.state.roundFinished,
+                       hasEmpty: !!document.querySelector('.vs-panel .vs-empty') });
+        if (swap) click(swap);
+        results.push({ step: '点「换词库」后落到设置页',
+                       hasSelect: !!document.querySelector('#vs-collection') });
+        phase = 'coll2'; setTimeout(step, 100);
+      }, 120);
+      return;
+    }
+    if (phase === 'coll2'){
+      var sel = document.querySelector('#vs-collection');
+      results.push({ step: '换库前的词表样本', before: {
+        first: (function(){ var w = document.querySelector('.vs-panel .vs-word'); return w ? String(w.textContent).trim() : null; })(),
+        options: sel ? Array.prototype.map.call(sel.options, function(o){ return o.value; }) : [],
+        picked: sel ? sel.value : null,
+      } });
+      if (sel){
+        // 真派发 change 事件 —— 模拟用户选另一本
+        var target = null;
+        for (var i = 0; i < sel.options.length; i++){
+          if (sel.options[i].value !== sel.value) { target = sel.options[i].value; break; }
+        }
+        results.push({ step: '选中的目标词库', to: target });
+        if (target){
+          sel.value = target;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      // ⚠️ 必须在**还留在设置页**的时候读结果行：切回「今日」之后设置页
+      //    的 DOM 就没了，那时再去 querySelector('#vs-collection-status')
+      //    永远拿到 null —— 我第一版就是这么写的，白白报了一个假 FAIL。
+      phase = 'coll3'; setTimeout(step, 500); return;
+    }
+    if (phase === 'coll3'){
+      var statusLine = document.querySelector('#vs-collection-status');
+      var st0 = app.state;
+      results.push({ step: '换库结果', collection: st0.settings.collections[0],
+                     statusText: statusLine ? String(statusLine.textContent).trim() : null,
+                     statusKind: statusLine ? (statusLine.dataset.kind || null) : null,
+                     stillOnSettings: !!document.querySelector('#vs-collection') });
+      // 读完了再回「今日」，看主页到底有没有词
+      var tab2 = findBtn('今日');
+      if (tab2) click(tab2);
+      setTimeout(function(){
+        var st = app.state;
+        results.push({ step: '换库后（回今日页）', s: snap(app) });
+        results.push({ step: '换库后主页状态', emptyMsg: (function(){
+                         var e = document.querySelector('.vs-panel .vs-empty');
+                         return e ? String(e.textContent).trim() : null;
+                       })(),
+                       cardWordId: st.card ? st.card.word.id : null });
+        out(); return;
+      }, 300);
+      return;
     }
   }
   setTimeout(step, 60);
@@ -372,10 +445,48 @@ sw = facts.get("存在「换词库」（走完一轮状态下）")
 if sw:
     checks.append(("走完一轮后「换词库」在界面上", sw.get("found") is True))
 
+# ── 换词库：用户报「显示更换成功但主页没反应」────────────────
+# 判据是**主页真的给出新词库的词**，不是"下拉框变了"。
+# updateSettings({collections:[id]}) 语法完全正确、下拉框也真的变了，
+# 但队列没重建、词表没重载 —— 所以只查下拉框的测试会全绿，而用户看到的没变。
+c1 = facts.get("今日页上找得到「换词库」入口")
+if c1:
+    checks.append(("今日页有「换词库」入口（不是死路）", c1.get("found") is True))
+c2 = facts.get("点「换词库」后落到设置页")
+if c2:
+    checks.append(("点「换词库」真的进到设置页，且下拉框在", c2.get("hasSelect") is True))
+c3 = facts.get("换库结果")
+c4 = facts.get("换库后主页状态")
+if c3:
+    checks.append(("换库后设置里指向的是新词库（不是还留在旧库）",
+                   c3.get("collection") not in (None, "cet4"),
+                   "换成 %s" % c3.get("collection")))
+    checks.append(("换库结果对用户可见（设置页有结果行，且是成功口径）",
+                   c3.get("statusText") is not None and c3.get("statusKind") == "ok",
+                   "kind=%s text=%r" % (c3.get("statusKind"), c3.get("statusText"))))
+if c4:
+    # 断言要精确对准**用户报的那句话**。
+    # 我第一版写的是"emptyMsg 必须是 None"，退 bug 自检时红是红了，
+    # 但红出的文案是「这一轮走完了 今天已背 46 词」—— 那是另一个界面。
+    # 换句话说：只要主页换成**任何**非空状态，那条断言都会红/绿，
+    # 它锁的不是用户看到的东西。改成直接否定那句文案。
+    checks.append(("换库后主页不再说「今天没有需要复习的词」",
+                   "今天没有需要复习的词" not in (c4.get("emptyMsg") or ""),
+                   "主页文案=%r" % c4.get("emptyMsg")))
+    checks.append(("换库后主页真的给出了新词库的词卡",
+                   c4.get("cardWordId") is not None
+                   and str(c4.get("cardWordId")).startswith(str(c3.get("collection")) + ":"),
+                   "卡片=%s" % c4.get("cardWordId")))
+
 print("\n── 自动判定 ──")
 bad = 0
-for name, okv in checks:
-    print("  %s %s" % ("PASS" if okv else "FAIL", name))
+for c in checks:
+    # 允许三元组 (名称, 是否通过, 失败时的细节) —— 失败时把原因直接打出来，
+    # 免得我对着一个 FAIL 再手动去翻上面的原始数据。
+    name, okv = c[0], c[1]
+    detail = c[2] if len(c) > 2 else ""
+    tail = "" if okv or not detail else "   ← %s" % detail
+    print("  %s %s%s" % ("PASS" if okv else "FAIL", name, tail))
     if not okv:
         bad += 1
 if failed:

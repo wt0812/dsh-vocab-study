@@ -218,6 +218,9 @@ export function renderSettings(root, state, app) {
 
   const setNum = (key) => (ev) => app.updateSettings({ [key]: Number(ev.target.value) });
 
+  // 整页重建时把「上次选中的词库」挂到 root 上：换库的失败回落要知道原来选的是哪本。
+  root.dataset.collection = String(s.collections[0] || '');
+
   mount(
     root,
     el('div', { class: 'vs-h2', text: '每天几个词' }),
@@ -279,12 +282,31 @@ export function renderSettings(root, state, app) {
     el('div', { class: 'vs-h2', text: '词库' }),
     el('div', { class: 'vs-field' }, [
       el('label', {}, ['当前词库', el('span', { class: 'note', text: '换库要联网；拉不到就用内置词表顶' })]),
-      select(
-        Object.values(L.COLLECTIONS || {}).map((c) => [c.id, c.name]),
-        s.collections[0],
-        (v) => app.updateSettings({ collections: [v] }),
-      ),
+      // ⚠️ 换词库**必须真的把词换掉**，不能只当一个设置项保存。
+      //
+      // 这里原来写的是 `app.updateSettings({ collections: [v] })`，而
+      // updateSettings 只在 dailyGoal / balance 变化时重建容器 ——
+      // 于是换库只改了一个字段：state.words 还是老词库的、今日队列还是老的
+      // （多半已背完），主页就一直停在「今天没有需要复习的词」。
+      // 用户原话：「我明明显示了更换成功但是主页并没有反应」。
+      //
+      // 现在调 app.changeCollection()：重载词表 → 重种记忆 → 重建今日队列。
+      // 它是异步的（可能要走网络），所以下面单独给它一个状态行，
+      // 成功/失败都写出来 —— 别让用户再对着一个没反应的界面猜。
+      el('select', {
+        class: 'vs-select',
+        id: 'vs-collection',
+        'data-prev': String(s.collections[0] || ''),
+        onchange: (ev) => switchCollection(ev.target, app, ev.target.value),
+      }, Object.values(L.COLLECTIONS || {}).map((c) => el('option', {
+        value: String(c.id),
+        selected: String(c.id) === String(s.collections[0]) ? true : null,
+        text: c.name,
+      }))),
     ]),
+    // 换库结果从**快照**里读（state.lastLibraryChange）：
+    // 成功换库会 emit() → 整页重绘，只写 DOM 的提示会被冲掉。
+    collectionStatusLine(state.lastLibraryChange),
     el('div', { class: 'vs-sub', text: state.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
 
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
@@ -346,6 +368,32 @@ function previewBalance(state, app, bal) {
   return `预计今日 ${s.containerSize || c.items.length} 词（复习 ${s.reviewCount || 0} · 收藏 ${s.personalCount || 0} · 新词 ${s.newCount || 0}）`;
 }
 
+/**
+ * 换库结果行。从快照的 `lastLibraryChange` 渲染 —— 不写 DOM。
+ *
+ * 三种结果都要说出来（P7 数据诚实）：
+ *   · 换成了：新词库几个词、是不是离线词表、今日已重排
+ *   · 没换（选的就是当前这本）
+ *   · 没换成：**原因**（网络？没有词？），并且下拉框会回落到原词库
+ */
+function collectionStatusLine(chg) {
+  const box = el('div', { class: 'vs-collection-status', id: 'vs-collection-status' });
+  if (!chg) return box;
+  if (chg.ok && chg.unchanged) {
+    box.dataset.kind = 'info';
+    box.textContent = '这本就是当前词库，没有改动。';
+    return box;
+  }
+  if (chg.ok) {
+    box.dataset.kind = 'ok';
+    box.textContent = `已换成新词库，共 ${chg.count} 个词 —— 今日已按新词表重新排好`;
+    return box;
+  }
+  box.dataset.kind = 'error';
+  box.textContent = `上次换库没成功：${chg.error || '未知原因'}（仍是原来的词库）`;
+  return box;
+}
+
 function select(options, value, onchange, id) {
   return el(
     'select',
@@ -355,6 +403,55 @@ function select(options, value, onchange, id) {
       return el('option', { value: String(v), selected: String(v) === String(value) ? true : null, text: label });
     }),
   );
+}
+
+/**
+ * 换词库：真的重载词表并重建今日队列。
+ *
+ * 为什么单独写一个而不是塞进通用 select：
+ * 它是这里**唯一会做异步 I/O** 的设置项（可能走网络拉词表）。
+ * 塞进同步 onchange 里，用户只会看到下拉框变了、别的没反应 —— 那正是原来
+ * 那个 bug 的表象（用户原话：「显示更换成功但主页并没有反应」）。
+ *
+ * ⚠️ 结果**不写 DOM**，而是存进 core 的 lastLibraryChange：
+ * 成功换库会 emit() 触发整页重绘，临时写进 DOM 的提示会被冲掉，
+ * 于是用户只看到"闪一下"或者干脆看不到。重绘后由 renderSettings 从
+ * 快照里读出来渲染，才不会丢。
+ */
+async function switchCollection(sel, app, id) {
+  if (!sel || !id) return;
+  const prev = sel.dataset.prev || '';
+  sel.disabled = true;
+  const line = sel.closest('.vs-panel')?.querySelector('#vs-collection-status');
+  if (line) {
+    line.textContent = '正在换词库…（要联网拉词表）';
+    line.dataset.kind = 'loading';
+  }
+  try {
+    const res = typeof app.changeCollection === 'function'
+      ? await app.changeCollection(id)
+      : { ok: false, error: '内核没有 changeCollection（版本太旧？）' };
+    if (!res || !res.ok) {
+      // 失败要**回落**到原来那本 —— 不能让下拉框显示一个其实没生效的选择，
+      // 那正是这次用户被误导的地方。
+      if (prev) sel.value = prev;
+      sel.disabled = false;
+      if (line) {
+        line.textContent = `换库失败：${(res && res.error) || '未知原因'}（已保持原词库）`;
+        line.dataset.kind = 'error';
+      }
+      return;
+    }
+    // 成功：changeCollection 已经 emit() 过了，面板会重绘，
+    // 状态行由 renderSettings 从快照里重新画出来。这里不用管。
+  } catch (e) {
+    if (prev) sel.value = prev;
+    sel.disabled = false;
+    if (line) {
+      line.textContent = `换库出错：${(e && e.message) || e}（已保持原词库）`;
+      line.dataset.kind = 'error';
+    }
+  }
 }
 
 function togglePrompt(root, app, key) {

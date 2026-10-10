@@ -50,6 +50,8 @@ export function createApp(ports = {}) {
     offline: false,
     banner: null,
     librarySource: 'seed',
+    /** 换词库的一次性结果，给设置页显示；成功/失败/原因都放这里（别只写 DOM） */
+    lastLibraryChange: null,
   };
 
   const listeners = new Set();
@@ -85,6 +87,9 @@ export function createApp(ports = {}) {
       offline: state.offline,
       banner: state.banner,
       librarySource: state.librarySource,
+      // 换词库的一次性结果（成功/失败/原因）。必须放进快照里：
+      // changeCollection 成功后会 emit() 触发整页重绘，只写在 DOM 上的提示会被冲掉。
+      lastLibraryChange: state.lastLibraryChange,
       stats: computeStats(),
       empty: !state.container || state.container.items.length === 0,
       // 本轮是否已经跑完（用来决定"再背一轮 / 再来几个新词"要不要出现）
@@ -371,8 +376,29 @@ export function createApp(ports = {}) {
       now: now(),
     };
   }
+  /**
+   * 今天的新词闸门统计 —— **只算当前这本词库**。
+   *
+   * ⚠️ 这里少了"按词库过滤"曾经是个真 bug（用户报「换词库显示成功但主页没反应」）：
+   * 原来把当天所有词库的作答混在一起数。用户在四级全答"忘了"走完一轮 →
+   * newAnswerCount=5、newWrongRate=1.0 → shouldBlockNew 为真；
+   * 这时换到六级，闸门仍然认为"今天新词额度用完了"，于是六级的新词一个都不推；
+   * 而六级的复习池又是空的（那些词还没学过）→ 队列 0 张 →
+   * 主页继续显示「今天没有需要复习的词」，换多少个库都一样。
+   *
+   * 口径修成按词库之后：闸门问的是"**这本**今天推了几个新词、错得多不多"，
+   * 换库自然重新开始，和用户"换本书重新学"的直觉一致。
+   */
   function todayStats() {
-    const today = state.records.filter((r) => r.dayKey === state.dayKey);
+    const active = state.settings?.collections?.[0] || null;
+    const today = state.records.filter((r) => {
+      if (r.dayKey !== state.dayKey) return false;
+      if (!active) return true;
+      // 老记录没有 collection 字段：从 wordId 前缀推（cet6:abandon），
+      // 推不出来就当作"属于四级"，免得历史数据被算丢。
+      const coll = r.collection || (String(r.wordId || '').includes(':') ? String(r.wordId).split(':')[0] : 'cet4');
+      return coll === active;
+    });
     const newRecs = today.filter((r) => r.tier === 3);
     const wrong = newRecs.filter((r) => r.incorrect).length;
     return {
@@ -582,6 +608,10 @@ export function createApp(ports = {}) {
       sessionId: state.session?.sessionId || null,
       queueSnapshotId: state.session?.dayKey || null,
       tier: card.tier,
+      // 这条记录属于哪本词库。todayStats() 用它把新词闸门**按词库**统计：
+      // 换了词库之后，"上一本今天推过 5 个新词"不该继续挡住新词库。
+      // 用户报的换库无反应，有一半就是这个原因（见 todayStats 的注释）。
+      collection: card.word.collection || null,
       schemaVersion: 1,
     };
     state.records.push(row);
@@ -733,6 +763,88 @@ export function createApp(ports = {}) {
     emit();
   }
 
+  /**
+   * 换词库：**真的把词换掉**。
+   *
+   * ⚠️ 这里曾经是个真 bug（用户报「显示更换成功但主页没反应」）：
+   * 设置页的下拉框只调了 `updateSettings({ collections: [id] })`，
+   * 而 updateSettings 只在 dailyGoal / balance 变化时重建容器 ——
+   * 于是换库只改了一个设置字段：`state.words` 还是老词库的，
+   * `state.container` 还是老的（多半已经背完、空着）。
+   * 今日页因此永远停在「今天没有需要复习的词」，怎么换都不动。
+   *
+   * 而 `L.loadCollection()` 全仓库原本**只在 init() 里调用一次**，
+   * 所以"换库"从来没有真正加载过另一个词库。
+   *
+   * 现在按和 init() 同样的顺序做：重载词表 → 重种记忆 → 重建今日队列。
+   *
+   * @param {string} id 词库 id（L.COLLECTIONS 里的）
+   * @returns {Promise<{ok:boolean, count?:number, offline?:boolean, error?:string}>}
+   */
+  async function changeCollection(id) {
+    const coll = String(id || '').trim();
+    if (!coll) {
+      const error = '词库 id 是空的';
+      state.lastLibraryChange = { ok: false, error, at: now() };
+      emit();
+      return { ok: false, error };
+    }
+    // ⚠️ 必须校验词库 id 是**认识的**。
+    // loadCollection() 对不认识的 id 不会报错，它会返回四级种子词、
+    // 只是把 id 前缀换掉（见 library.mjs 的 seedFor）→ 于是"换库成功"是假的：
+    // 界面上说成功、设置里写了新 id，实际背的还是四级那批词换个名字。
+    // 这类"不认识的输入被默许"正是这一串 bug 的共同病根。
+    const known = Object.keys(L.COLLECTIONS || {});
+    if (known.length && !known.includes(coll)) {
+      const error = `没有「${coll}」这个词库`;
+      state.lastLibraryChange = { ok: false, error, at: now() };
+      emit();
+      return { ok: false, error };
+    }
+    if (coll === (state.settings.collections?.[0] || '')) {
+      // 选的还是当前这本：不重建，免得把正在背的那一轮清掉
+      state.lastLibraryChange = { ok: true, unchanged: true, at: now() };
+      emit();
+      return { ok: true, count: (state.words || []).length, unchanged: true };
+    }
+
+    // 词表可能来自网络；失败不能把状态搞坏，所以先加载、成功了再改设置。
+    let res;
+    try {
+      res = await L.loadCollection(coll, { fetcher: ports.fetcher, cache: cachePort() });
+    } catch (e) {
+      const error = (e && e.message) || '词库加载失败';
+      state.lastLibraryChange = { ok: false, error, at: now() };
+      emit();
+      return { ok: false, error };
+    }
+    if (!res || !Array.isArray(res.words) || !res.words.length) {
+      const error = '这个词库里没有词';
+      state.lastLibraryChange = { ok: false, error, at: now() };
+      emit();
+      return { ok: false, error };
+    }
+
+    state.settings = normalizeSettings({ ...state.settings, collections: [coll] });
+    state.words = mergePersonal(res.words, state.personal);
+    // 只对新词库的词补记忆种子；已有记忆原样保留（换库不该清掉学习记录）
+    state.mem = L.seedMemories(state.words, state.mem, now());
+    state.offline = res.offline;
+    state.banner = res.banner;
+    state.librarySource = res.source;
+    // 换库结果要能被**重绘正确地渲染出来**，不能只写在 DOM 上：
+    // buildContainer() 会 emit() → 整页重建，临时写进 DOM 的提示会被冲掉。
+    state.lastLibraryChange = { ok: true, count: state.words.length, collection: coll, at: now() };
+
+    // 关键的一步：重建今日队列。
+    // 这会丢掉当前这一轮（未答完的部分）—— 和改 dailyGoal 的既有行为一致。
+    // 换库本质上就是"换一批词"，留着旧队列反而更让人困惑。
+    buildContainer();
+    persist();
+    emit();
+    return { ok: true, count: state.words.length, offline: !!res.offline, source: res.source };
+  }
+
   /** 主动休假（§7.7）：有钥匙的退出，比偷偷溜走更容易回来。 */
   function setVacation(untilTs) {
     state.settings.vacationUntil = untilTs;
@@ -855,6 +967,7 @@ export function createApp(ports = {}) {
     reportFakeMastery,
     retention,
     updateSettings,
+    changeCollection,
     setVacation,
     addPersonal,
     removePersonal,

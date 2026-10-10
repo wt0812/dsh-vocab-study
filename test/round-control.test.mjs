@@ -268,6 +268,83 @@ console.log('\n⑦ 回归锁：渲染验证发现不了的两个 bug：');
   ok('放行后闸门状态是"已放行"', app3.state.newGate.bypassed === true);
 }
 
+// ── ⑧ 换词库必须真的把词换掉 ─────────────────────────────────
+// 用户原话：「我背了一轮之后，我点击换词库，我明明显示了更换成功但是主页
+// 并没有反应，还是显示今天没有需要复习的词」。
+//
+// 根因（写在 core/app.mjs 的 changeCollection 注释里）：
+//   设置页的下拉框只调 updateSettings({ collections: [id] })，
+//   而 updateSettings 只在 dailyGoal / balance 变化时重建容器 ——
+//   于是换库只改了一个设置字段：state.words 还是老词库的，
+//   state.container 还是老的（已经背完、空着）。
+//   而 L.loadCollection() 全仓库原本只在 init() 里调用过一次，
+//   所以"换库"从来没有真正加载过另一个词库。
+//
+// 这里锁死整条链：换库之后 word 真的换了、今日队列真的有卡、确实是新词库的词。
+console.log('\n⑧ 换词库（用户抱怨"显示更换成功但主页没反应"）：');
+{
+  const app4 = await freshApp();
+  // 词表不在快照里（快照只给界面要用的东西），要去 raw 上读。
+  const before = app4.raw.words.map((w) => w.id);
+  ok('（前置）开局用的是四级种子词表',
+     before.length > 0 && before.every((id) => id.startsWith('cet4:')),
+     `${before.length} 个词，例 ${before[0]}`);
+  // 顺带记一笔：种子里 cet4 的 id 也带前缀（`cet4:abandon`），
+  // 我第一版断言写成"四级不带冒号"，是错的 —— 判据是每本各一套、互不重叠。
+
+  runRound(app4, S.RATING.FORGOT);
+  ok('（前置）走完一轮后今日页是空的（正是用户看到的那一屏）',
+     app4.state.card === null && app4.state.roundFinished === true);
+
+  const res = await app4.changeCollection('cet6');
+  ok('换词库返回成功', res && res.ok === true, res && JSON.stringify(res));
+
+  const after = app4.raw.words.map((w) => w.id);
+  ok('词表真的换掉了（不是只改了个设置字段）',
+     after.length > 0 && after.every((id) => id.startsWith('cet6:')),
+     `${after.length} 个词，例 ${after[0]}`);
+  ok('换的是**另一个**词库的词（id 和原来不重叠）',
+     after.every((id) => !before.includes(id)));
+
+  ok('设置里的当前词库指向新库', app4.state.settings.collections[0] === 'cet6');
+
+  // 这一条是用户抱怨的核心：主页必须**立刻**有词可背，
+  // 而不是继续停在「今天没有需要复习的词」。
+  ok('换库后今日页立刻有词卡（主页不再说"没有需要复习的词"）',
+     app4.state.card !== null && app4.state.empty === false,
+     app4.state.card ? `卡片=${app4.state.card.word.id}` : '仍然没有词卡');
+  ok('换库后的队列是重建过的（不是上一轮残留的空队列）',
+     app4.state.session && app4.state.session.queue.length > 0,
+     app4.state.session ? `队列 ${app4.state.session.queue.length} 张` : '无 session');
+  ok('换库结果对外可见（界面能说出"换成了"）',
+     app4.state.lastLibraryChange && app4.state.lastLibraryChange.ok === true
+       && app4.state.lastLibraryChange.count > 0);
+
+  // 换库不该清掉学习记录：换回来，之前的记忆还在。
+  const memBefore = Object.keys(app4.raw.mem || {}).length;
+  await app4.changeCollection('cet4');
+  ok('换回原词库也能成功', app4.state.settings.collections[0] === 'cet4');
+  const memAfter = Object.keys(app4.raw.mem || {}).length;
+  ok('换库不清空学习记忆（换回来记忆还在）', memAfter >= memBefore,
+     `换前 ${memBefore} 条 / 换后 ${memAfter} 条`);
+
+  // 选的就是当前这本：不该重建，免得把正在背的那一轮清掉。
+  const sameSession = app4.state.session;
+  const sameRes = await app4.changeCollection('cet4');
+  ok('重复选当前词库：不重建队列（不会清掉正在背的这一轮）',
+     sameRes && sameRes.ok === true && sameRes.unchanged === true
+       && app4.state.session === sameSession);
+
+  // 不存在的词库：必须失败**并且回落**，不能留下一个没生效的选择。
+  const badRes = await app4.changeCollection('no-such-collection');
+  ok('换到不存在的词库会失败（不静默假装成功）', badRes && badRes.ok === false, badRes && badRes.error);
+  ok('失败后当前词库仍是原来那本（回落，不是留个假选择）',
+     app4.state.settings.collections[0] === 'cet4');
+  ok('失败原因对外可见（界面能说出"为什么没换成"）',
+     app4.state.lastLibraryChange && app4.state.lastLibraryChange.ok === false
+       && typeof app4.state.lastLibraryChange.error === 'string');
+}
+
 console.log('\n────────────────────────────────────────────────────────');
 if (fail === 0) {
   console.log(`${GREEN}${pass} 通过 / 0 失败${OFF}  —— 三个抱怨都有对应断言`);
