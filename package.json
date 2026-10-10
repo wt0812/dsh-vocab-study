@@ -36,7 +36,10 @@
     "cordis.patch.yml",
     "README.md",
     "screenshots.json",
-    "assets"
+    "assets",
+    "tools",
+    "test",
+    "docs"
   ],
   "scripts": {
     "build": "python tools/build.py && python tools/build-plugin.py",

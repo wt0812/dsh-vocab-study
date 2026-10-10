@@ -1,0 +1,42 @@
+# npm 的 files 字段写 "tools" 是**整个目录**收进去，.gitignore 管不住它。
+# 结果 Python 跑过一次就会留下 __pycache__，被打进包里（实测真的发生过）。
+# 这个文件就是拦这类东西的。
+
+# ── Python 字节码缓存 ────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ── 安装器的本机备份（含本机绝对路径，绝不能外发）────
+.dsh-install-backup/
+
+# ── 我在仓库根目录随手写的临时脚本/产物 ──────────────
+/_*.py
+/_*.txt
+/_*.json
+/_*.html
+/_*.css
+/_*.png
+/_pages/
+
+# ── 演示页与截图工具 ─────────────────────────────────
+# demo/ 本来就不在 files 里；这行是双保险。
+demo/
+
+# ── 编辑器 / 系统 ────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── npm / git 自身 ───────────────────────────────────
+.git/
+.github/
+.npmignore
+package-lock.json
+node_modules/
+*.log
+*.tmp
+*.bak
+*.orig

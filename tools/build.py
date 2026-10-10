@@ -48,6 +48,42 @@ def write(rel, text):
         f.write(text)
 
 
+def build_stamp():
+    """构建时间戳 —— **必须是确定性的**。
+
+    以前这里是 datetime.now()，结果是同样源码每次构建产物都不一样：
+    提交的 demo/app.js 和重新构建的永远差一行时间戳，于是
+    「提交的产物是不是最新的」这件事在 CI 里根本没法验（一验就是红的假警报）。
+
+    现在按这个优先级取：
+      1. SOURCE_DATE_EPOCH —— 可复现构建的标准变量，有就用它；
+      2. 否则取 core/ 与 ui/ 里**最新的源码 mtime**。
+
+    选 2 的理由：改了源码没重新构建时，时间戳仍会变 → CI 照样抓得住；
+    而同一份源码构建两次必然得到同一个戳 → 可复现。
+    """
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch:
+        try:
+            return datetime.datetime.fromtimestamp(
+                int(epoch), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            pass  # 值不合法就当没设，别把构建搞崩
+    newest = 0.0
+    for ns, rel in CORE_ORDER:
+        p = os.path.join(ROOT, rel)
+        if os.path.exists(p):
+            newest = max(newest, os.path.getmtime(p))
+    for _, rel, _ in UI:
+        p = os.path.join(ROOT, rel)
+        if os.path.exists(p):
+            newest = max(newest, os.path.getmtime(p))
+    if newest <= 0:
+        return "unknown"
+    return datetime.datetime.fromtimestamp(
+        newest, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # ── core：按依赖顺序摊进同一个作用域 ──────────────────────────
 # 顺序即依赖顺序：后面的文件可以引用前面声明的东西。
 CORE_ORDER = [
@@ -930,7 +966,7 @@ def build():
         ns_lines.append("const %s = { %s };" % (ns, ", ".join(names)))
 
     out = []
-    stamp = datetime.datetime.now().isoformat(timespec="seconds")
+    stamp = build_stamp()
     out.append(u"""/*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
