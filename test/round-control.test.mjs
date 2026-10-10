@@ -10,6 +10,7 @@
 import { createApp } from '../core/app.mjs';
 import * as S from '../core/session.mjs';
 import * as Q from '../core/queue.mjs';
+import { createStorage } from '../store/client-store.mjs';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', OFF = '\x1b[0m';
 let pass = 0, fail = 0;
@@ -34,9 +35,12 @@ async function freshApp() {
 function runRound(app, rating) {
   let guard = 0;
   while (guard++ < 400) {
-    const st = app.state;
-    if (st.roundFinished) break;
-    const card = st.card;
+    // 走 raw 而不是 state：state 是渲染用的快照，如果容器形状不完整它会抛
+    // TypeError，把这个辅助函数直接崩掉，后面的断言一条都跑不到。
+    // 测试辅助函数不该因为"被测对象坏了"而自己炸 —— 那样报出来的是崩溃堆栈，
+    // 不是"哪条断言不成立"。
+    if (!app.raw.session || S.isFinished(app.raw.session)) break;
+    const card = S.currentCard(app.raw.session);
     if (!card) break;
     app.rate(rating);
     app.next();
@@ -374,6 +378,169 @@ console.log('\n⑧ 换词库（用户抱怨"显示更换成功但主页没反应
   ok('失败原因对外可见（界面能说出"为什么没换成"）',
      app4.state.lastLibraryChange && app4.state.lastLibraryChange.ok === false
        && typeof app4.state.lastLibraryChange.error === 'string');
+}
+
+// ── ⑨ 设置要留痕：关掉再打开，我设的还得是我设的 ────────────────────
+//
+// 用户原话：「我需要的是我设置了多少就多少，你要记忆保存啊，我每次进来就是
+// 20，可是我自己设置了10个啊，我需要我每次设置留痕呀」
+//
+// 根因有两层，缺一不可：
+//   A. init() 里只有 `if (!state.session) buildContainer();` —— 恢复成功的
+//      那条路上 state.container **永远是 null**，而底部「今日 x/y」的分母、
+//      环的分母、st.empty 全是从 container 算的。设置其实**存住了**，但界面
+//      拿不到本轮规模，看起来就像没保存。
+//   B. 所以断言不能只查 `settings.dailyGoal === 10`（那个一直是对的、
+//      查了会假绿），必须查**界面真正用的那个数**：containerSize / roundSize。
+console.log('\n⑨ 设置留痕（关掉再打开，我设的还得是我设的）：');
+{
+  clock = Date.parse('2026-10-09T09:00:00+08:00');
+  // 同一份内存存储 → 模拟"关掉 DSH 再打开"（每次重开都是一个新 app 实例）
+  const shared = (() => {
+    const box = new Map();
+    return {
+      async get(k) { return box.has(k) ? JSON.parse(box.get(k)) : null; },
+      async set(k, v) { box.set(k, JSON.stringify(v)); },
+      async append(k, v) { const a = box.has(k) ? JSON.parse(box.get(k)) : []; a.push(v); box.set(k, JSON.stringify(a)); },
+      async keys() { return [...box.keys()]; },
+      async remove(k) { box.delete(k); },
+    };
+  })();
+
+  const a1 = createApp({ now: () => clock, storage: shared });
+  await a1.init();
+  ok('第一次打开是默认 20', a1.state.settings.dailyGoal === 20 && a1.state.roundSize === 20);
+
+  a1.updateSettings({ dailyGoal: 10 });
+  ok('设成 10 之后，本轮规模跟着变成 10（不是只改了个字段）',
+     a1.state.settings.dailyGoal === 10 && a1.state.roundSize === 10,
+     `dailyGoal=${a1.state.settings.dailyGoal} roundSize=${a1.state.roundSize}`);
+
+  // 背掉两个再关，模拟"背到一半关掉面板"
+  a1.rate(S.RATING.KNOWN); a1.next();
+  ok('背了 1 个之后底部计数是 1/10', (a1.state.session.stats.answered || 0) === 1
+     && a1.state.container.stats.containerSize === 10);
+
+  const a2 = createApp({ now: () => clock, storage: shared });
+  await a2.init();
+  ok('重启后设置还是我设的 10（留痕）', a2.state.settings.dailyGoal === 10,
+     `dailyGoal=${a2.state.settings.dailyGoal}`);
+  // ⚠️ 这两条才是真正锁住用户抱怨的断言。只查 settings 会假绿。
+  ok('重启后本轮规模还是 10，不是退回 20（用户报「每次进来就是20」）',
+     a2.state.roundSize === 10
+       && !!a2.state.container && a2.state.container.stats.containerSize === 10,
+     `roundSize=${a2.state.roundSize} containerSize=${a2.state.container && a2.state.container.stats.containerSize}`);
+  ok('重启后容器不为空（container=null 会让界面判成"今天没词"）',
+     !!a2.state.container && a2.state.empty === false);
+  // 注意写法：container 为 null 时要**报红**，不是抛 TypeError 把后面几条全吃掉。
+  // 我第一版写的是 `a2.state.container.stats.containerSize`，去掉修复后测试直接崩在
+  // 这一行，后面三条根本没跑到 —— 崩溃不等于断言。
+  ok('重启后计数器分母是 10，不是 0（containerSize=0 会让环显示 0/0）',
+     !!a2.state.container && a2.state.container.stats.containerSize === 10,
+     `containerSize=${a2.state.container && a2.state.container.stats.containerSize}`);
+
+  // 走完重启后这一轮，确认真的是 10 个而不是 20
+  runRound(a2, S.RATING.KNOWN);
+  ok('重启后走完这一轮，本轮排过的词数就是 10',
+     a2.state.roundSize === 10, `roundSize=${a2.state.roundSize}`);
+
+  // 「再背一轮」在重启后也要能重建同一批
+  const reopened = createApp({ now: () => clock, storage: shared });
+  await reopened.init();
+  const midSession = reopened.state.session;
+  ok('重启后恢复的是「还没背完的那一轮」，不是从头开始',
+     !!midSession && !reopened.state.roundFinished);
+
+  // 换别的设置项也要留痕
+  const a3 = createApp({ now: () => clock, storage: shared });
+  await a3.init();
+  a3.updateSettings({ order: 'seq', roundSize: 10, balance: 0.8 });
+  const a4 = createApp({ now: () => clock, storage: shared });
+  await a4.init();
+  ok('顺序 / 冲刺批大小 / 天平也一起留痕',
+     a4.state.settings.order === 'seq' && a4.state.settings.roundSize === 10
+       && a4.state.settings.balance === 0.8,
+     `order=${a4.state.settings.order} roundSize=${a4.state.settings.roundSize} balance=${a4.state.settings.balance}`);
+  ok('换词库也留痕',
+     a4.state.settings.collections[0] === 'cet4');
+}
+
+console.log('\n⑩ 真的存储件：写进去的，读得出来（用户报「我设置了10个，每次进来就是20」）：');
+{
+  // ⚠️ 这一节**必须**用真实的 store/client-store.mjs + 假 localStorage。
+  //
+  // 上面 ⑨ 节用的是我自己写的内存存储，它顺理成章地"写什么读什么"，
+  // 所以那个真凶在 ⑨ 里**根本照不出来** —— 我一开始就是这么被绕过去的。
+  // 真凶在存储层：set() 把值包成 { v: SCHEMA, value } 写进去，而 get()
+  // 直接把整个包装对象返回、**没有拆开**。于是 app.init() 里
+  // `saved.settings` 永远是 undefined，每次都退回默认 20。
+  // 数据其实一直好好地躺在 localStorage 里，只是没人拆包装。
+  const backing = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (backing.has(k) ? backing.get(k) : null),
+    setItem: (k, v) => backing.set(k, String(v)),
+    removeItem: (k) => backing.delete(k),
+  };
+  globalThis.sessionStorage = {
+    getItem: () => 'tab-test', setItem: () => {}, removeItem: () => {},
+  };
+  const NS = 'vocab-study';
+
+  // ① 最底层的对称性：set 之后 get 必须拿回**原来的值**，不是包装层
+  const s0 = createStorage({ namespace: NS, now: () => clock });
+  const payload = { settings: { dailyGoal: 10 }, mem: { 'cet4:a': 1 } };
+  await s0.set('state', payload);
+  const got = await s0.get('state');
+  ok('storage 往返对称：get 拿回的是原值，不是 { v, value } 包装层',
+     !!got && got.settings && got.settings.dailyGoal === 10,
+     `拿到 ${JSON.stringify(got && got.settings)}；包装层是 ${JSON.stringify(got && got.v !== undefined)}`);
+
+  // 裸值（没有包装层）也要能读，不能把历史数据读成 undefined
+  globalThis.localStorage.setItem(`${NS}:legacy`, JSON.stringify({ settings: { dailyGoal: 3 } }));
+  const legacy = await s0.get('legacy');
+  ok('没有包装层的老数据也能读回来（向后兼容）',
+     !!legacy && legacy.settings && legacy.settings.dailyGoal === 3);
+
+  // ② 端到端：设成 10 → 关掉（时间前进）→ 重开，必须还是 10
+  clock = Date.parse('2026-10-09T09:00:00+08:00');
+  const storeA = createStorage({ namespace: NS, now: () => clock });
+  const appA = createApp({ storage: storeA, now: () => clock });
+  await appA.init();
+  appA.updateSettings({ dailyGoal: 10 });
+  ok('设成 10 之后本轮规模就是 10', appA.state.roundSize === 10, `roundSize=${appA.state.roundSize}`);
+
+  clock += 60000;
+  const storeB = createStorage({ namespace: NS, now: () => clock });
+  const appB = createApp({ storage: storeB, now: () => clock });
+  await appB.init();
+  ok('用真实存储件重启：dailyGoal 还是 10（用户报「每次进来就是20」）',
+     appB.state.settings.dailyGoal === 10, `dailyGoal=${appB.state.settings.dailyGoal}`);
+  ok('用真实存储件重启：本轮规模是 10，容器分母也是 10',
+     appB.state.roundSize === 10 && appB.state.container.stats.containerSize === 10,
+     `roundSize=${appB.state.roundSize} containerSize=${appB.state.container && appB.state.container.stats.containerSize}`);
+  ok('用真实存储件重启：容器不为空、有词可背',
+     !!appB.state.container && appB.state.empty === false);
+
+  // ③ 别的设置项与学习记忆同样要留痕
+  appB.updateSettings({ order: 'seq', roundSize: 10, balance: 0.8 });
+  appB.rate(S.RATING.KNOWN); appB.next();
+  const memCount = Object.keys(appB.raw.mem || {}).length;
+  clock += 60000;
+  const storeC = createStorage({ namespace: NS, now: () => clock });
+  const appC = createApp({ storage: storeC, now: () => clock });
+  await appC.init();
+  ok('顺序 / 冲刺批大小 / 天平也留痕',
+     appC.state.settings.order === 'seq' && appC.state.settings.roundSize === 10
+       && appC.state.settings.balance === 0.8,
+     `order=${appC.state.settings.order} roundSize=${appC.state.settings.roundSize} balance=${appC.state.settings.balance}`);
+  ok('学习记忆也留痕（重启后记忆条数不缩水）',
+     Object.keys(appC.raw.mem || {}).length >= memCount,
+     `重启前 ${memCount} / 重启后 ${Object.keys(appC.raw.mem || {}).length}`);
+
+  // ④ 多窗口只读锁不能靠"上一条锁没清"就把用户变成只读
+  //    （另一条容易被误当成根因的线索，这里顺手锁住它没被误伤）
+  ok('单窗口反复重开不会把自己变成只读',
+     storeC.readOnly === false, `readOnly=${storeC.readOnly} ${storeC.readOnlyReason || ''}`);
 }
 
 console.log('\n────────────────────────────────────────────────────────');

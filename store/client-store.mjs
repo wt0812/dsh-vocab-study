@@ -125,7 +125,22 @@ export function createLocalStorage({ namespace = NS, now = () => Date.now(), onD
           const arr = lists.get(key);
           return arr ? arr.slice() : null;
         }
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        // ⚠️ 必须拆开写入时套的那层包装 { v: SCHEMA, value }。
+        //
+        // 用户报「我需要的是我设置了多少就多少，你要记忆保存啊，我每次进来
+        // 就是20，可是我自己设置了10个啊」—— 真凶就是这一行。
+        // set() 写的是 { v: SCHEMA, value }（见下面的 set），append/list 也都
+        // 老老实实取了 .value，**只有 get() 直接把整个包装对象返回了**。
+        // 于是 app.init() 里 `saved.settings` 永远是 undefined，每次都退回
+        // 默认 20 —— 数据其实在 localStorage 里躺得好好的，只是没人拆包装。
+        // 键名、锁、配额、降级全都没问题，坏的只有这一处对称性。
+        //
+        // 兼容老的裸值：没有包装就直接返回，别把历史数据读成 undefined。
+        if (parsed && typeof parsed === 'object' && 'value' in parsed && 'v' in parsed) {
+          return parsed.value === undefined ? null : parsed.value;
+        }
+        return parsed;
       } catch {
         return null;
       }

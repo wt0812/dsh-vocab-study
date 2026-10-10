@@ -333,7 +333,7 @@ node test/round-control.test.mjs
 | `test/client-activation.test.mjs` | **真的把 `lib/client.js` 跑起来**：注册 → 物化工厂 → 检查导出 → **调 `apply(ctx)`** → 断言注册了哪些槽位。守的是"插件能不能被宿主激活" | **18 通过 / 0 失败** |
 | `test/bundle-audit.test.mjs` | 产物静态审计：只有 1 处 `load()`、只 `require('react')`、`inject` 声明齐全、没有"未声明服务上的裸方法调用"、`openVocabTab` 的契约（见事故三、四）、**宿主容器能撑开面板 + 限宽居中不被 margin 简写清零**（见事故五） | **全部通过** |
 | `test/mount.test.mjs` | **真的把界面画出来并断言节点进了 DOM 树**：从产物里抠出傀儡工厂 → 拿真容器建一遍 → 断言容器里真的有 `.vs-panel` / `.vs-capsule`。守的是"注册成功了但屏幕上是空的"（见事故三）。第 ⑤ 节守**播放键不是死键**（见事故六） | **33 通过 / 0 失败** |
-| `test/round-control.test.mjs` | 「背完一轮之后」的三条出路：今日已背计数、再背一轮、往后加量、安全阀（自动触发 + 用户放行）、跨天重置，**三个只有真点一遍才发现的 bug 的回归锁**，第 ⑧ 节**换词库必须真的把词换掉**（见事故七），以及**加量必须恰好加 5 个且本轮无重复**（见事故八） | **72 通过 / 0 失败** |
+| `test/round-control.test.mjs` | 「背完一轮之后」的三条出路：今日已背计数、再背一轮、往后加量、安全阀（自动触发 + 用户放行）、跨天重置，**三个只有真点一遍才发现的 bug 的回归锁**，第 ⑧ 节**换词库必须真的把词换掉**（见事故七），第 ⑨ 节**设置要留痕**，第 ⑩ 节**用真实存储件测写入/读取对称**（见事故九 —— 这节的绿必须是真绿，因为前两节用的替身把它屏蔽过） | **92 通过 / 0 失败** |
 
 另外有两个**浏览器里真点一遍**的验证工具（不是单测，需要本机 Chrome）：
 
@@ -1011,6 +1011,89 @@ const built = Q.buildDailyContainer(..., { N: step, exclude });   // 只建设 5
 4. **新断言必须证明它会红。** 先把 `extendRound` 逐字换回 5bccd73 的老实现，
    确认 2 条新断言立刻变红（第一次"退回"没退干净 —— `seen` 那层过滤还在
    起作用，所以全绿；重做时把整段函数体换掉才真红）。绿了不等于守住了。
+
+
+---
+
+### 事故九：设置**根本存不住**，每次重开都退回 20 ⚠️ 最隐蔽的一次（三个 bug 叠在一起）
+
+用户原话：**"我需要的是我设置了多少就多少，你要记忆保存啊，我每次进来就是20，
+可是我自己设置了10个啊，我需要我每次设置留痕呀，不能这样啊"**
+
+#### 真凶（主因）：`storage.get()` 忘了拆自己套的包装层
+
+`store/client-store.mjs` 里，写入和读取**不对称**：
+
+```js
+set(key, value) {
+  ls.setItem(k(key), JSON.stringify({ v: SCHEMA, value }));   // 套了一层包装
+}
+get(key) {
+  return JSON.parse(ls.getItem(k(key)));                       // ← 整个包装层原样返回
+}
+```
+
+`append()` 和 `list()` 都老老实实取了 `.value`，**只有 `get()` 没有**。
+于是 `app.init()` 里这一行：
+
+```js
+const saved = (await storage.get('state')) || {};
+state.settings = normalizeSettings(saved.settings);   // saved.settings 永远是 undefined
+```
+
+`saved` 拿到的是 `{ v: 1, value: {...} }`，`saved.settings` 是 `undefined`，
+每次启动都退回默认 20。**数据其实一直好好躺在 localStorage 里** ——
+键名、写锁、配额、降级都没问题，坏的只有这一处对称性。
+
+实测（真实存储件 + 假 localStorage）：
+
+```
+localStorage 原始内容: {"v":1,"value":{"settings":{"dailyGoal":10}}}
+storage.get('state') 返回: {"v":1,"value":{"settings":{"dailyGoal":10}}}
+  实得的 back.settings = undefined      ← 要的 10 在 back.value.settings 里
+```
+
+#### 为什么之前所有验证都是绿的（这一点比 bug 本身更值得记）
+
+1. **单测用的是我自己写的内存存储**，它顺理成章地"写什么读什么"，
+   把这个真凶**完全屏蔽**了。我加了 ⑨ 节一堆"重启后设置还在"的断言，
+   它们全绿 —— 因为那条路径根本不经过真实存储。
+2. **demo 用的是它自己的存储端口**（`ui/shell.mjs` 的 `demoStorage`，
+   `mem[k]` 直接存取、没有包装层），所以浏览器验证再怎么点也照不出来。
+3. 于是"我测过了"在这件事上**毫无价值**：被测的不是用户跑的那条路。
+
+修完之后，我专门加了第 ⑩ 节，**用真实的 `store/client-store.mjs`** 来锁这条，
+并且先写最底层的对称性断言（`set` 之后 `get` 必须拿回原值），再写端到端。
+退回老 `get()` 时这四条立刻变红，报的正是用户那句话：`dailyGoal=20 roundSize=20`。
+
+#### 顺带揪出的第二个 bug：恢复成功时容器是 `null`
+
+把主因修好之后（设置终于读得回来了），另一个 bug 才显形。
+`core/app.mjs` 的 `init()` 原来是：
+
+```js
+if (!state.session) buildContainer();      // 只有"没有 session"时才建容器
+```
+
+而崩溃恢复分支在成功时**会把 `state.session` 填上**，于是这行不执行，
+`state.container` 留在 `null`。可是界面上一大堆东西是从容器算的：
+底部「今日 x/y」的分母、环的分母、`st.empty`（`!container || items.length === 0`）。
+实测：重启后 `container=null`、`roundSize=0`、`empty=false` 却拿不到规模。
+
+修法：恢复成功时用 `rebuildContainerFromSession()` **从恢复出来的 session
+反推容器**，绝不重新选词、不新建 session —— 否则会把用户恢复出来的队列位置
+冲掉（规格 §7.2 要求"从第 N 个词继续"）。并且顺手把 `snapshotState()` 里
+`state.container.items.length` 改成形状检查（`Array.isArray`）：那是**每次渲染
+都会走**的一行，形状一旦不完整就抛 TypeError、整个界面白屏。
+（这个我踩到了：去掉兜底后测试直接崩在那一行，后面断言一条都跑不到。
+崩溃不等于断言。）
+
+#### 结论
+
+设置留痕这件事上，"我设置了多少就多少"**之前一次都没成立过** ——
+上面两个 bug 单独任何一个都足以让它失效。第三个是测试的问题：
+**测试用的替身（内存存储 / demo 存储）和被验证的真实路径不是同一条，
+这种绿是假的。** 现在 ⑩ 节直接测真实存储件。
 
 
 ---

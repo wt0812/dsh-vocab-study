@@ -91,7 +91,14 @@ export function createApp(ports = {}) {
       // changeCollection 成功后会 emit() 触发整页重绘，只写在 DOM 上的提示会被冲掉。
       lastLibraryChange: state.lastLibraryChange,
       stats: computeStats(),
-      empty: !state.container || state.container.items.length === 0,
+      // ① 这里**必须**同时保住 container 和 container.items。
+      //    `state` 是每次渲染都读的 getter，只要有一个容器形状不完整
+      //    （items 缺失 / 被写坏 / 老版本存下来的数据结构），这一行就会抛
+      //    TypeError —— 而它抛出来，整个界面就白屏，用户看到的是"插件坏了"。
+      //    这次修「设置不留痕」时就真的踩到了：container 曾经是 null，
+      //    去掉兜底后测试直接崩在这里，后面所有断言一条都跑不到。
+      //    判空写成"形状不对就当空"，比"假设形状一定对"安全。
+      empty: !state.container || !Array.isArray(state.container.items) || state.container.items.length === 0,
       // 本轮是否已经跑完（用来决定"再背一轮 / 再来几个新词"要不要出现）
       roundFinished: !state.session || S.isFinished(state.session),
       // 本轮排过的卡数（不含同轮重训插入），用于文案「这一轮 20 词」
@@ -156,10 +163,76 @@ export function createApp(ports = {}) {
       }
     }
 
+    // ⚠️ 恢复成功也必须把 container 补出来，不能只在"没 session"时才建。
+    //
+    // 这里原来只有一行 `if (!state.session) buildContainer();` —— 于是恢复成功的
+    // 那条路上 `state.container` **永远是 null**，而界面上一大堆东西是从它算的：
+    //   · 底部「今日 x/y」的分母、环的分母
+    //   · st.empty（= !container || items.length === 0）→ 判成"今天没词"
+    // 用户报「我设置了 10 个，每次进来就是 20」就是这一条：设置其实**存住了**
+    // （存储里 dailyGoal 确实是 10），但容器是 null，界面拿不到真实的本轮规模，
+    // 于是显示成"没有需要复习的词" / 默认数字，看起来就像设置没保存。
+    //
+    // 注意：这里**只能重建容器，绝不能重新选词建新 session** ——
+    // 那会把用户恢复出来的队列位置冲掉（§7.2 要求从第 N 个词继续）。
+    if (state.session && !state.container) rebuildContainerFromSession();
+
     if (!state.session) buildContainer();
     state.ready = true;
     emit();
     return snapshotState();
+  }
+
+  /**
+   * 把容器从**已经恢复出来的 session** 反推出来：不重新选词、不新建 session，
+   * 所以用户不会因为中途关掉面板而回到第 1 个词。
+   *
+   * 只在"有 session 但没有 container"（重启后恢复）时用。
+   */
+  function rebuildContainerFromSession() {
+    const key = state.dayKey || Q.dayKey(now());
+    const gap = gapDays();
+    const byWord = new Map();
+    // 过滤掉同轮重训卡：一个词在队列里可能出现多次（答"忘了"最多再现 2 次），
+    // 但容器要的是"本轮排过的**词**"，不是"要做的卡"。
+    for (const c of state.session.queue) {
+      if (!c || !c.word) continue;
+      if (c.isRetry) continue;
+      // mem 从 state.mem 取，**不要**用 c.mem：S.restore() 重建队列时不带
+      // mem 字段（见 session.mjs 里 restore 的 map），恢复出来的卡 c.mem 是
+      // undefined。照抄它会让容器里的条目少一个字段，界面按层级/强度取用时踩空。
+      if (!byWord.has(c.word.id)) {
+        byWord.set(c.word.id, { word: c.word, mem: state.mem[c.word.id], tier: c.tier });
+      }
+    }
+    const items = [...byWord.values()];
+    const size = state.session.plannedSize || items.length;
+    const tierCount = (t) => items.filter((i) => i.tier === t).length;
+    state.container = {
+      items,
+      stats: {
+        // 重训卡不算"词"，所以这些数字按去重后的词条重算，不照抄 session.stats
+        reviewCount: tierCount(Q.TIER.REVIEW),
+        personalCount: tierCount(Q.TIER.PERSONAL),
+        newCount: tierCount(Q.TIER.NEW),
+        size: items.length,
+        // 用户设了多少就是多少 —— 恢复时也要用存下来的本轮规模，
+        // 不能退回默认值，否则「我设了 10 却显示 20」会再犯一次。
+        containerSize: size,
+        balance: state.settings.balance,
+        offline: !!state.offline,
+        newBlocked: false,
+        newBlockBypassed: false,
+      },
+      dayKey: key,
+      gapDays: gap,
+      comeback: Q.comebackCopy(gap),
+      baseN: state.settings.dailyGoal,
+      autoN: Q.containerSize(gap, state.settings.dailyGoal),
+      restored: true,
+    };
+    // 「再背一轮」据此重建同一批卡，所以必须一起补上
+    state.roundItems = items.map((it) => ({ ...it, isRetry: false }));
   }
 
   function cachePort() {
