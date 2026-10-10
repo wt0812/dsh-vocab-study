@@ -132,6 +132,11 @@ export function createPanelPuppet({ core, mountTo, host = {} } = {}) {
     toast: host.toast || (() => {}),
     onEscape: host.onEscape || (() => {}),
     onToggleDock: host.onToggleDock || (() => {}),
+    // ⚠️ 这一项原来漏了，于是「单词右边的播放键」是个死键：
+    // 用户实测点下去 speechSynthesis.speak() 调用数 0→0，界面上毫无反应。
+    // 界面层点单词会调 ctx.onSpeak(word)，而它一直没人传。
+    // 默认值直接用本文件已经导入的 speak()，返回 boolean 供界面层给反馈。
+    onSpeak: host.onSpeak || ((word) => speak(word)),
   });
 
   if (mountTo && typeof mountTo.appendChild === 'function') mountTo.appendChild(panel.root);

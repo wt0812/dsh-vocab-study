@@ -26,6 +26,23 @@ DEMO_HTML = io.open(DEMO, encoding="utf-8").read()
 
 DRIVER = r"""
 <script>
+// ── 发音间谍：必须在 <body> 末尾、其余脚本之前装上 ──
+// 为什么拦真 speechSynthesis 而不是用 demo 自己的 onSpeak 钩子：
+// 用户报的 bug 就是"点了没声音"，坏的正是 speak 这一层。
+// 用宿主钩子等于绕开被怀疑的那段代码，测不出东西。
+(function(){
+  window.__SPOKEN = [];
+  window.__SYNTH = 0;
+  var s = window.speechSynthesis;
+  if (!s) { window.__NO_SYNTH = true; return; }
+  var orig = s.speak ? s.speak.bind(s) : null;
+  s.speak = function(u){
+    window.__SYNTH++;
+    window.__SPOKEN.push(u && u.text);
+    try { if (orig) orig(u); } catch (e) { /* 无头环境没声音设备，正常 */
+    }
+  };
+})();
 (function(){
   var results = [];
   function out(){
@@ -110,6 +127,22 @@ DRIVER = r"""
         setTimeout(step, 25); return;
       }
       results.push({ step: '面板已打开', s: snap(app) });
+      phase = 'speak'; setTimeout(step, 60); return;
+    }
+    // ── 播放键：用户报「单词右边的播放键是无效的」────────────────
+    // 现场：处理函数里调的是 `globalThis.__VS_SPEAK__?.(word)` —— 一个从来
+    // 没有人赋值的全局钩子，配上 `?.` 永远静默；后面 `if (ctx.onSpeak)` 也
+    // 一直是空的（适配层转发 host 时漏了这一项）。两条路都断，点了毫无反应、
+    // 连报错都没有。修完后这里必须能听到真的 speechSynthesis.speak 调用。
+    if (phase === 'speak'){
+      var wbtn = document.querySelector('.vs-panel .vs-word');
+      var before = window.__SYNTH;
+      var wtext = wbtn ? String(wbtn.textContent || '').trim() : null;
+      if (wbtn) click(wbtn);
+      results.push({ step: '点单词发音', found: !!wbtn, label: wtext,
+                     noSynth: !!window.__NO_SYNTH,
+                     synthBefore: before, synthAfter: window.__SYNTH,
+                     spoken: window.__SPOKEN.slice(-3) });
       phase = 'finish1'; setTimeout(step, 40); return;
     }
     if (phase === 'finish1'){
@@ -303,6 +336,26 @@ if al:
 dup = facts.get("加量不重复")
 if dup:
     checks.append(("加量不重复", dup.get("dup") == 0))
+
+# 播放键：用户报「单词右边的播放键是无效的」。
+# 判据是"真的发出了朗读请求"，不是"按钮存在"—— 它一直都存在，只是点了没用。
+sp = facts.get("点单词发音")
+if sp:
+    if sp.get("noSynth"):
+        checks.append(("播放键：本环境没有 speechSynthesis（跳过）", True))
+    else:
+        checks.append(("播放键：界面上找得到 .vs-word", sp.get("found") is True))
+        checks.append(
+            ("点一下播放键，真的发出朗读请求（speechSynthesis.speak 调用数 +1）",
+             (sp.get("synthAfter") or 0) > (sp.get("synthBefore") or 0)),
+        )
+        spoke = sp.get("spoken") or []
+        lbl = sp.get("label") or ""
+        checks.append(
+            ("读的就是卡片上那个词（不是空串、不是 undefined）",
+             len(spoke) > 0 and isinstance(spoke[-1], str) and len(spoke[-1]) >= 2
+             and spoke[-1] in lbl),
+        )
 
 # 这条是这一轮最重要的回归锁：点「我还是想继续」之后，
 # 界面必须真的给卡，而且给的是没背过的。之前这里给的是刚背过的第一个词

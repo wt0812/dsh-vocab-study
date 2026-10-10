@@ -70,6 +70,8 @@ function FakeNode(tag) {
   this.style = {};
   this.className = '';
   this.hidden = false;
+  /** 事件处理表：addEventListener 真的往这里存（原来被空函数丢了） */
+  this._handlers = {};
 }
 // ui/dom.mjs 的 mount() 用 `instanceof Node` 判真伪，所以挂到全局。
 //
@@ -135,14 +137,55 @@ function makeNode(tag) {
     removeAttribute(k) {
       delete this.attrs[k];
     },
-    addEventListener() {},
-    removeEventListener() {},
-    focus() {},
-    querySelector() {
-      return null;
+    // ⚠️ 这里原来是空函数 —— 而 el() 挂事件全靠它：
+    // ui/dom.mjs:13 `else if (k.startsWith('on') && typeof v === 'function')
+    //                node.addEventListener(k.slice(2).toLowerCase(), v)`
+    // 空实现的后果：所有 onclick 处理函数**被静默丢掉**，于是"点一下"永远
+    // 点不出任何东西 —— 想验「播放键点了会不会发音」根本无从下手。
+    // 现在真的存起来，配合下面的 click() 派发。
+    addEventListener(type, fn) {
+      if (typeof fn === 'function') (this._handlers[type] = this._handlers[type] || []).push(fn);
     },
-    querySelectorAll() {
-      return [];
+    removeEventListener(type, fn) {
+      const list = this._handlers[type];
+      if (!list) return;
+      const i = list.indexOf(fn);
+      if (i >= 0) list.splice(i, 1);
+    },
+    /** 触发一次点击 —— 让"点播放键"这种检查能真的走到处理函数里 */
+    click() {
+      for (const fn of this._handlers.click || []) fn({ type: 'click', target: this });
+      return true;
+    },
+    focus() {},
+    // ⚠️ 这里原来恒返回 null —— 而面板**全靠它**找元素：
+    // panel.mjs 里 `host.querySelector('#vs-badges' / '#vs-ipa' / '#vs-headline'
+    // / '#vs-stage' / '#vs-actions' / '#vs-card')` 一共十几处。
+    // 恒 null 的后果：卡片还没画出来，setText(null, ...) 就炸
+    // "Cannot read properties of null (reading 'firstChild')"，
+    // 于是"点播放键"这类行为检查**在一个错误的前提下**失败 —— 看起来像产品坏了，
+    // 其实是我的桩不够真实。所以这里实现一个真的查找：
+    // 支持 '#id'、'.class'、'tag' 三种最简单形式（够面板用了）。
+    querySelector(sel) {
+      const hit = this.querySelectorAll(sel);
+      return hit.length ? hit[0] : null;
+    },
+    querySelectorAll(sel) {
+      const out = [];
+      const s = String(sel || '');
+      const match = (n) => {
+        if (s.startsWith('#')) return n.attrs && n.attrs.id === s.slice(1);
+        if (s.startsWith('.')) return String(n.className || '').split(/\s+/).includes(s.slice(1));
+        return String(n.tagName || '').toUpperCase() === s.toUpperCase();
+      };
+      const walk = (n) => {
+        for (const c of n.childNodes || []) {
+          if (match(c)) out.push(c);
+          walk(c);
+        }
+      };
+      walk(this);
+      return out;
     },
     // 注意：这里不能用 getter —— Object.assign 会**求值** getter，
     // 而求值时 this 指向那个字面量而不是节点，会炸。firstChild 由下面刷新。
@@ -419,10 +462,37 @@ if (!extracted) {
 
   const F = extracted.api;
   // 一个"够像 app"的假内核：面板会订阅状态、读 state、可能 await init()
+  //
+  // ⚠️ state 必须**有卡片**：`raw.ready: true` 时面板第一帧就直接渲染，
+  //    而 `card: null` 会让它走"本轮走完"的空状态分支 —— 那样就没有 .vs-word
+  //    可点，播放键行为检查会在一个错误的前提下失败（我第一次就踩了这个）。
   function makeFakeApp() {
     return {
-      state: { card: null, lastReveal: null, phase: 'idle' },
-      raw: { ready: true },
+      state: {
+        card: {
+          cardId: 'c-speak-1',
+          kind: 'new',
+          word: { id: 'w-considerate', word: 'considerate', phonetic: '/kənˈsɪdərət/' },
+        },
+        lastReveal: null,
+        phase: 'idle',
+        ready: true,
+        // 面板会读这些；给最小可用值，避免一堆 undefined 访问
+        session: { sessionId: 's-speak', stats: { answered: 0 } },
+        settings: { roundSize: 5, order: 'shuffle' },
+        streak: { current: 0 },
+        combo: { count: 0 },
+        exp: 0,
+        roundFinished: false,
+        roundSize: 5,
+        canRestart: true,
+        newGate: { autoBlocked: false, bypassed: false, closed: false },
+        stats: { todayAnswered: 0 },
+      },
+      // 面板会读 app.raw.mem[card.word.id]（panel.mjs:425）——
+      // 少了 mem 就 "Cannot read properties of undefined (reading 'w-...')"。
+      // raw 是**内部状态**，面板确实会直接读它，所以桩必须给。
+      raw: { ready: true, mem: {}, settings: {} },
       subscribe: () => () => {},
       beckon: () => ({ state: 'first', visible: true, label: '🌱 今天第一词', tone: { key: 'fresh' } }),
       init: async () => {},
@@ -514,7 +584,140 @@ if (!extracted) {
   const capCls = host3.allClasses().join(' ');
   check(host3.childNodes.length > 0, `胶囊节点真的进了容器（childNodes=${host3.childNodes.length}）`);
   check(capCls.includes('vs-capsule'), `容器里是 .vs-capsule（实际第一项："${(capCls.split(' ')[0] || '(空)').slice(0, 40)}"）`);
-}
 
+  // ── [4d] 播放键行为：真建面板、点一下，onSpeak 必须被调到 ──
+  // 必须在这个 `if (F)` 块内：F / makeNode / DOC 都是块内绑定，
+  // 写到块外会 "F is not defined"（我第一次就写在了外面，4 条行为断言全红）。
+  const host4 = makeNode('div');
+  host4.className = 'vs-pane-host';
+  DOC.body.appendChild(host4);
+  const spoken = [];
+  let panel4 = null;
+  try {
+    panel4 = F.createPanelPuppet({
+      core: { app: makeFakeApp() },
+      mountTo: host4,
+      host: {
+        onSpeak: (w) => {
+          spoken.push(w);
+          return true;
+        },
+      },
+    });
+  } catch (e) {
+    check(false, '带 onSpeak 时面板能建起来', e && e.message);
+  }
+
+  // 递归找 .vs-word（假 DOM 的 querySelector 恒返回 null，只能自己走）
+  function findByClass(node, cls) {
+    if (!node) return null;
+    const own = String(node.className || (node.attrs && node.attrs['class']) || '');
+    if (own.split(/\s+/).includes(cls)) return node;
+    for (const c of node.childNodes || []) {
+      const hit = findByClass(c, cls);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  const wordBtn = panel4 ? findByClass(panel4.root, 'vs-word') : null;
+  check(wordBtn !== null, '面板里找得到 .vs-word 播放键（找不到说明卡片没渲染出来）');
+  if (wordBtn) {
+    // el() 是 addEventListener('click', fn) 挂的，所以用真的 click() 派发，
+    // 而不是找 .onclick 属性（假 DOM 里根本没有那个属性）。
+    check((wordBtn._handlers.click || []).length === 1, '.vs-word 上挂了 1 个 click 处理函数');
+    try {
+      wordBtn.click();
+    } catch (e) {
+      check(false, '点播放键不抛错', e && e.message);
+    }
+    check(spoken.length === 1, `点一次播放键，onSpeak 被调到 1 次（实际 ${spoken.length} 次）`);
+    check(
+      spoken.length > 0 && typeof spoken[0] === 'string' && spoken[0].length > 0,
+      `传给 onSpeak 的是一个真单词（收到 ${JSON.stringify(spoken[0])}）`,
+    );
+  }
+
+  // 反面对照：宿主不给 onSpeak 时**不能**静默 —— 走兜底并给反馈
+  const host5 = makeNode('div');
+  host5.className = 'vs-pane-host';
+  DOC.body.appendChild(host5);
+  const toasts = [];
+  let panel5 = null;
+  try {
+    panel5 = F.createPanelPuppet({
+      core: { app: makeFakeApp() },
+      mountTo: host5,
+      host: { toast: (m) => toasts.push(m) },
+    });
+  } catch (e) {
+    check(false, '不带 onSpeak 时面板也能建起来', e && e.message);
+  }
+  const btn5 = panel5 ? findByClass(panel5.root, 'vs-word') : null;
+  if (btn5) {
+    try {
+      btn5.click();
+    } catch (e) {
+      check(false, '不带 onSpeak 时点播放键不抛错', e && e.message);
+    }
+  }
+  check(
+    toasts.length >= 1,
+    `宿主没给 onSpeak 时，点播放键会走兜底（原生 speak）并给出反馈（toast=${toasts.length} 条）`,
+  );
+}
+// ── 到这里 `if (extracted) { ... }` 块结束 ──
+// 下面的静态检查不依赖块内的 F / makeNode / DOC，所以放在块外。
+
+// ══════════════════════════════════════════════════════════════
+// [5] 播放键不能是死键（2026-10-10 用户报「单词右边的播放键是无效的」）
+// ══════════════════════════════════════════════════════════════
+//
+// 现场：点单词 → `globalThis.__VS_SPEAK__?.(word)`。那是个**从来没有人赋值**
+// 的全局钩子，配上 `?.` 于是永远静默；紧接着 `if (ctx.onSpeak) ...`，
+// 而 adapter/dsh/puppet.mjs 转发 host 时**漏了 onSpeak**。
+// 两条路都是空的，用户点下去毫无反应、控制台连报错都没有。
+//
+// 真浏览器实测（有 speechSynthesis、包了计数器）：
+//   修前 → 点了 speechSynthesis.speak() 调用数 0→0
+//   修后 → 0→1，lang=en-US rate=0.9
+console.log('\n[5] 播放键必须真的有出路（不能有"读了就没人写"的钩子）');
+
+// 5a 静态：死钩子不许回来
+const clientBundle = fs.readFileSync(path.join(ROOT, 'lib', 'client.js'), 'utf8');
+const bundleNoComment = clientBundle.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+check(
+  !/__VS_SPEAK__/.test(bundleNoComment),
+  '产物里没有 __VS_SPEAK__ 这种"只读不写"的全局钩子（它静默失败，查都无从查起）',
+);
+
+// 5b 静态：适配层必须把 onSpeak 转给面板（这次 bug 的直接原因）
+check(
+  /onSpeak\s*:\s*host\.onSpeak\s*\|\|/.test(puppetSrc),
+  'puppet.mjs 的 createPanelPuppet 转发了 onSpeak（原来漏了这一项，于是键是死的）',
+);
+check(
+  /onSpeak[\s\S]{0,80}speak\(word\)/.test(puppetSrc),
+  'onSpeak 的默认值是本文件已导入的 speak(word)（不是又一个空函数）',
+);
+
+// 5c 静态：界面层得把结果返回出去，否则适配层拿不到 true/false、给不了反馈
+const panelSrc = fs.readFileSync(path.join(ROOT, 'ui', 'panel.mjs'), 'utf8');
+check(
+  /ctx\.onSpeak\s*\?\s*ctx\.onSpeak\(word\)/.test(panelSrc),
+  'panel.mjs 点单词时调 ctx.onSpeak(word)',
+);
+check(
+  // 兜底要有一条 toast，且文案不能是"成功"口径 —— 发不出声就得说实话（P7）
+  /ctx\.toast\?\.\([\s\S]{0,120}没有系统语音/.test(panelSrc),
+  '发不出声时给用户一句诚实的提示（而不是让键看起来像坏的）',
+);
+
+// ⚠️ 收尾必须放在**文件最末**：
+// 上面 `if (F) { ... }` 块里已经跑完了播放键的行为检查，
+// 这里统一汇总。注意别在中间插 process.exit —— 插了后面的检查就静默不跑了
+// （我第一次重构时正是把 exit 留在中间、又删掉了末尾这两句，
+//   结果整份测试退出码恒为 0，看着全绿其实什么都没验）。
 console.log(`\n${pass} 通过 / ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);
+
