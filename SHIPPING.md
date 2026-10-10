@@ -67,19 +67,34 @@ node tools/verify-market-entry.mjs <一个装了 js-yaml 的目录>
 是维护者本机跑脚本批量挑绿的合，**每批约 12 个，无固定时间表**
 （10-08 跑了 5 批，10-09 只跑 1 批）。所以"什么时候合"没有可预测的时刻。
 
-**关于 `--profile`：这是最容易搞错的一处。**
-DSH 按 profile 分目录装插件，装错等于装进另一个平行世界：
+**关于 `--profile`：这是最容易搞错的一处 —— 正确写法就是 `--profile web`。**
 
-| 界面 | 该用哪个 profile |
-|---|---|
-| 桌面客户端（Electron app） | `desktop` |
-| 浏览器里的 Web 界面 | `web` |
+DSH 按 profile 分目录装插件。`dsh plugin` 是命令行工具，它把后面的参数
+**原样转发给 profile 目录里的 pnpm**（读自 DSH 本体命令定义：
+*"manage a profile's plugins by forwarding the remaining arguments to pnpm in the
+profile directory"*），`--profile` 是**必填项**：
 
-市场目录里 4481 条的 install 命令**全是 `--profile web`**（那是给浏览器场景的默认值）。
-而我们这个仓库的开发与实测环境是**桌面客户端**，所以本机用的是 `profiles/desktop`。
-依据是 DSH 本体启动器里的 `runProfile({ profile: "desktop", ... })`
-（注释：*Launch the Desktop profile through the Web application*），
-而 `PROFILE_TEMPLATES` 里只有 `acp` / `web` / `headless` / `sdk` / `sdk-minimal`，**没有 `desktop`**。
+```sh
+dsh plugin --profile web add dsh-vocab-study
+dsh plugin --profile web add github:wt0812/dsh-vocab-study
+```
+
+⚠️ **`--profile desktop` 会直接报错**，不要写：
+
+```
+error: profile "desktop" is managed exclusively by the Electron application
+```
+
+读自 DSH 本体启动器 `rejectElectronProfile()`：`desktop` 这个 profile 名
+**保留给 Electron 应用独占管理**，CLI 拒绝针对它的 `plugin-management`。
+桌面客户端用户也**照写 `--profile web`** —— 桌面 App 用的
+`profiles/desktop` 是**它自己写进去的**，不需要手工装。
+
+> **这段曾经写错并已订正。** 早先的结论是「桌面客户端该用 `--profile desktop`」，
+> 依据只有 `runProfile({ profile: "desktop" })` 和 `PROFILE_TEMPLATES` 里没有 `desktop` ——
+> **都是真的，但漏了 `rejectElectronProfile` 这道硬校验，所以推论是错的。**
+> 教训：从一个真事实（App 用 `desktop`）推出一个结论（CLI 就能写 `desktop`）之前，
+> 要把**拒绝路径**也读了。
 
 ---
 

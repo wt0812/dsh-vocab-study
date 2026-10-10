@@ -30,7 +30,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 | 版本 | `0.1.0`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
 | 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 344 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
-| 装法 | `dsh plugin --profile desktop add github:wt0812/dsh-vocab-study` |
+| 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
 | 国内镜像 | [gitee.com/wutong2005/dsh-vocab-study](https://gitee.com/wutong2005/dsh-vocab-study)（**与 GitHub 逐提交一致**，见下） |
 | 市场收录 | 已提 PR [awesome-dsh-plugin#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043)，**等上游合并** |
 | 已知缺口 | 见[已知缺口](#已知缺口诚实清单)（8 条，含"未在真实网络环境验证词库拉取"这种） |
@@ -134,40 +134,41 @@ start demo\index.html
 
 ## 装进 DSH
 
-### 给别人用：从 GitHub 装（推荐）
+### 给别人用
 
 ```sh
+# 推荐：从 npm 装（快，国内有镜像）
+dsh plugin --profile web add dsh-vocab-study
+
+# 或者从 GitHub 源码装（npm 上不去时用）
 dsh plugin --profile web add github:wt0812/dsh-vocab-study
 ```
 
 装完 **完全退出 DeepSeek Harness 再打开**（`cordis.patch.yml` 是启动时读的，刷新页面没用）。
 
-**但请注意 profile 要选对，否则「装了没反应」。** DSH 是按 profile 分目录装插件的，
-装错 profile 等于装进了另一个平行世界：
+**关于 `--profile`，这是最容易搞错的一处 —— 上面这两种写法就是对的。**
 
-| 你在用哪个界面 | 该用哪个 profile |
-|---|---|
-| **桌面客户端**（Electron 那个 app） | `desktop` |
-| 浏览器里的 Web 界面 | `web` |
+`dsh plugin` 是命令行工具，它把后面的参数**原样转发给 profile 目录里的 pnpm**
+（读的是 DSH 本体的命令定义：「manage a profile's plugins by forwarding the
+remaining arguments to pnpm in the profile directory」），其中 `--profile` 是**必填项**。
 
-所以桌面客户端用户请这样装（把 `web` 换成 `desktop`）：
+⚠️ **不要写 `--profile desktop`** —— 那会直接报错：
 
-```sh
-dsh plugin --profile desktop add github:wt0812/dsh-vocab-study
+```
+error: profile "desktop" is managed exclusively by the Electron application
 ```
 
-> 依据（读的是 DSH 本体的启动器，不是猜的）：`PROFILE_TEMPLATES` 里只有
-> `acp` / `web` / `headless` / `sdk` / `sdk-minimal`，**没有 `desktop`**；
-> 而桌面应用的启动器里写的是
-> `runProfile({ profile: "desktop", ... })`，注释是
-> *"Launch the Desktop profile through the Web application"* ——
-> 也就是说桌面版**用的是 Web 应用的实现、但 profile 名叫 `desktop`**，
-> 并且它的端口是 19387。
->
-> 市场目录里 4481 条清的 install 命令**全部**是 `--profile web`，
-> 那是给浏览器场景的默认值，不等于桌面客户端该用的值。
+读自 DSH 本体的启动器（`rejectElectronProfile`）：`desktop` 这个 profile 名
+**保留给 Electron 应用独占管理**，CLI 拒绝针对它的 `plugin-management`。
+所以**桌面客户端用户也用 `--profile web`** —— 你桌面 App 一直用的就是
+`profiles/desktop` 那个目录，**是 App 自己写进去的，不需要你手动装进去**。
+`dsh plugin --profile web add ...` 写的是 `profiles/web`，你平时打开的那个 Web
+界面（以及桌面版内嵌的那个）都读它。
 
-**不需要 npm、不需要构建、不需要 Python。** `lib/` 里的产物已经提交进仓库，`dsh plugin` 走的是 profile 目录里的 pnpm，装完就能用。
+> 市场目录里 4481 条条目的 install 命令**全部**是 `--profile web` —— 跟这里一致。
+
+**不需要 npm 命令行工具、不需要构建、不需要 Python。** 从 npm 装时 pnpm 会去
+registry 拉包；从 GitHub 装时 `lib/` 里的产物已经提交进仓库，装完就能用。
 
 卸载：
 
@@ -234,7 +235,8 @@ python tools/uninstall.py     # 卸干净，回到装之前的状态
 ### 换用 dsh plugin 命令也可以
 
 ```powershell
-dsh plugin --profile desktop add "F:\DeepSeek Harness\projects\vocab-study"
+# 装本机这个开发目录（注意不是 --profile desktop，那个 CLI 会拒绝）
+dsh plugin --profile web add "F:\DeepSeek Harness\projects\vocab-study"
 ```
 
 但它有两个已知副作用，所以本仓库默认用 `tools/install.py`：
