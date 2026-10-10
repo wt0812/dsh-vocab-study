@@ -48,29 +48,60 @@ function safeProtoKeys(obj) {
   }
 }
 
-/** 每个会话一个内核，避免多会话互相串数据。 */
-const cores = new Map();
+// ── 一个窗口 = 一个内核（不是"一个对话一个内核"）─────────────────
+//
+// 【事故十一】这里原来是 `const cores = new Map()`，按 sessionId 每个对话
+// 建一个内核。当时的想法是"避免多会话互相串数据"，但用户报回来的现象是：
+//
+//     「多个对话框之间居然不是共享的」
+//
+// 实测（两个会话共用同一个 localStorage）坏在三处：
+//
+//   ① 进度不同步：B 只在**打开面板那一刻**读一次存档，之后 A 背了多少
+//      B 一概看不见（实测 A 背 10 个，B 内存里还是 0）。
+//   ② 写入被吞：每个内核都去抢 client-store 里那把"一个窗口只许一个写入者"
+//      的锁。A 握着锁，B 一 `createStorage` 就被判成**只读**，于是 B 里改的
+//      设置全部写进内存、不落盘（实测 B 改成 30，磁盘上还是 20）。
+//   ③ 两个内核各自持有一份完整 app 状态，最后写入的覆盖另一份，
+//      谁背过哪些词完全对不上。
+//
+// 根子在于：**背单词的进度属于"这个人"，不属于某个对话**。所以窗口里
+// 只该有一个 app 实例，所有对话的所有席位（胶囊、面板）共用它。
+// 这样锁也不再自己跟自己抢，②自然消失。
+//
+// 为什么用 Promise 单例：座席（CapsuleSeat / VocabPane）是 React 同步渲染的，
+// 而 `app.init()` 是异步的（要读 localStorage）。直接返回未初始化的实例会让
+// 胶囊第一帧拿到空白状态。存 Promise，谁先到谁等它 resolve。
+let corePromise = null;
 
-/**
- * 取（或建）某个会话的内核。
- *
- * 注意这里**没有** `ctx` 参数：内核只需要一个会话 id。
- * 之前签名里挂着 `ctx`，一路从组件 props 传进来——而组件 props 里
- * **根本没有 ctx**（那是 undefined），于是所有基于 ctx 的能力全部静默失效。
- * 见文件末尾「事故四」的注释。
- */
+/** 取（或建）本窗口唯一的内核。sessionId 保留在签名里只为日志可读。 */
 function coreFor(sessionId) {
-  const key = String(sessionId ?? 'default');
-  let core = cores.get(key);
-  if (!core) {
-    core = createVocabCore({
-      // 交接态（§3.1）需要知道模型是否正在输出。当前未接：见 README「已知缺口」。
-      isStreaming: () => false,
-    });
-    cores.set(key, core);
+  if (!corePromise) {
+    corePromise = (async () => {
+      const core = createVocabCore({
+        // 交接态（§3.1）需要知道模型是否正在输出。当前未接：见 README「已知缺口」。
+        isStreaming: () => false,
+      });
+      try {
+        // init() 结尾自己会 emit()，所以先渲染的空壳会被这次 emit 填上真数据 ——
+        // 组件不需要额外去 await。
+        await core.app.init();
+      } catch (err) {
+        // init 抛错就让缓存失效：下次有人要内核时重试一次。
+        // 不这么做的话，这一次失败会被永久记住，用户只能重启客户端。
+        console.error('[vocab-study] 内核 init() 失败（下次取用会重试）：', err);
+        corePromise = null;
+        throw err;
+      }
+      return core;
+    })();
+    // 没人 await 这个 Promise，失败必须自己消费掉，否则会变成
+    // "unhandled rejection"，在某些宿主里会弹不该弹的错。
+    corePromise.catch(() => {});
   }
-  return core;
+  return corePromise;
 }
+
 
 /**
  * 把 DOM 木偶包成 React 组件：框架给容器，木偶负责往里面画。
@@ -92,7 +123,7 @@ function coreFor(sessionId) {
  * 面板标签页正文里那个 div 是**空的** —— 用户看到的现象就是
  * 「插件明明加载了、槽位注册也是 active，但界面上什么都没有」。
  */
-function usePuppet(create, deps) {
+function usePuppet(create, deps, core) {
   const puppetRef = React.useRef(null);
   // create 每次渲染都是新函数，但它只依赖 deps；用 ref 固定住，别让它进 effect 依赖
   const createRef = React.useRef(create);
@@ -101,7 +132,11 @@ function usePuppet(create, deps) {
   const [hostEl, setHostEl] = React.useState(null);
 
   React.useEffect(() => {
-    puppetRef.current = createRef.current(hostEl);
+    // ⚠️ 内核是异步来的（见 coreFor 的【事故十一】），第一帧 core 还是 null。
+    // 而木偶第一行就是 `core.app` —— 不挡住就是「Cannot read properties of null」
+    // 把座席 render 打挂。先只画个空壳：core 就绪后 deps 里的 `[core]` 变了，
+    // 这个 effect 会重跑，那时才真正建木偶。
+    if (core) puppetRef.current = createRef.current(hostEl);
     return () => {
       try {
         puppetRef.current?.destroy();
@@ -308,14 +343,41 @@ function openVocabTab(abilities, sessionId) {
 }
 
 /**
+ * 拿到本窗口唯一的内核（异步）。
+ *
+ * 第一次调用会触发建内核 + init()；之后的调用共享同一个 Promise。
+ * 返回 null = 还没就绪，调用方先渲染空壳即可 —— init() 完成时会 emit()，
+ * 而面板/胶囊都订阅了，于是会自动重画。
+ */
+function useCore() {
+  const [core, setCore] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    coreFor().then(
+      (c) => {
+        if (alive) setCore(c);
+      },
+      () => {
+        /* 失败已在 coreFor 里 log 过；这里什么也不做，界面留空 */
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return core;
+}
+
+/**
  * 胶囊：输入框右侧那一枚。
  *
  * `openTab` 这个 prop 由 `apply` 里注册时的 `inject` 提供（见 VocabMenuItem 上方注释）——
  * **不要**在这里找 `ctx`，组件 props 里从来没有 `ctx`。
  */
 function CapsuleSeat(props) {
-  const { sessionId, openTab } = props;
-  const core = coreFor(sessionId);
+  const { openTab } = props;
+  // 所有对话共用同一个内核（见 coreFor 上方【事故十一】）
+  const core = useCore();
 
   const { hostRef } = usePuppet(
     (hostEl) =>
@@ -328,6 +390,7 @@ function CapsuleSeat(props) {
         },
       }),
     [core, openTab],
+    core,
   );
 
   return React.createElement('div', {
@@ -339,8 +402,8 @@ function CapsuleSeat(props) {
 
 /** 标签页正文：整块面板。 */
 function VocabPane(props) {
-  const { sessionId, toast } = props;
-  const core = coreFor(sessionId);
+  const { toast } = props;
+  const core = useCore();
 
   const { hostRef } = usePuppet(
     (hostEl) =>
@@ -358,6 +421,7 @@ function VocabPane(props) {
         },
       }),
     [core],
+    core,
   );
 
   return React.createElement('div', { ref: hostRef, className: 'vs-pane-host' });
@@ -418,16 +482,24 @@ export function apply(ctx) {
     () => {
       const disposers = [];
 
-      // 会话关掉时把内核放掉
+      // 插件卸载时把内核放掉（放锁 + 清缓存，下次 apply 会重新建）。
+      // 注意这里只有**一个**内核（一个窗口一份，见 coreFor 上方【事故十一】），
+      // 不再是每个对话一个。
       disposers.push(() => {
-        for (const core of cores.values()) {
-          try {
-            core.store?.releaseLock?.();
-          } catch {
-            /* 忽略 */
-          }
-        }
-        cores.clear();
+        const pending = corePromise;
+        corePromise = null;
+        if (!pending) return;
+        pending
+          .then((core) => {
+            try {
+              core.store?.releaseLock?.();
+            } catch {
+              /* 忽略 */
+            }
+          })
+          .catch(() => {
+            /* 建内核失败过，没东西要放 */
+          });
       });
 
       // 声明标签页类型。没有 patterns：它不是靠地址打开的资源，而是按 kind 打开的「页」。

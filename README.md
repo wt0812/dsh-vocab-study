@@ -334,6 +334,7 @@ node test/round-control.test.mjs
 | `test/bundle-audit.test.mjs` | 产物静态审计：只有 1 处 `load()`、只 `require('react')`、`inject` 声明齐全、没有"未声明服务上的裸方法调用"、`openVocabTab` 的契约（见事故三、四）、**宿主容器能撑开面板 + 限宽居中不被 margin 简写清零**（见事故五） | **全部通过** |
 | `test/mount.test.mjs` | **真的把界面画出来并断言节点进了 DOM 树**：从产物里抠出傀儡工厂 → 拿真容器建一遍 → 断言容器里真的有 `.vs-panel` / `.vs-capsule`。守的是"注册成功了但屏幕上是空的"（见事故三）。第 ⑤ 节守**播放键不是死键**（见事故六） | **33 通过 / 0 失败** |
 | `test/round-control.test.mjs` | 「背完一轮之后」的三条出路：今日已背计数、再背一轮、往后加量、安全阀（自动触发 + 用户放行）、跨天重置，**三个只有真点一遍才发现的 bug 的回归锁**，第 ⑧ 节**换词库必须真的把词换掉**（见事故七），第 ⑨ 节**设置要留痕**，第 ⑩ 节**用真实存储件测写入/读取对称**（见事故九 —— 这节的绿必须是真绿，因为前两节用的替身把它屏蔽过），第 ③.5 节**「再来 5 个新词」不许重考刚背过的**（见事故十 —— 断言的是"下一张卡是谁"，不是容器自己的属性） | **100 通过 / 0 失败** |
+| `test/multi-conversation.test.mjs` | **两个对话必须共用同一个内核实例**（见事故十一）。物化真产物 → 拿真注册的胶囊组件 → 用假 React 挂两次（`conv-a` / `conv-b`）→ 断言两次拿到的是**同一个 app**，再从一个对话改设置、验证另一个立刻看到。第 ③ 节只做不会误报的结构断言 | **13 通过 / 0 失败** |
 
 另外有两个**浏览器里真点一遍**的验证工具（不是单测，需要本机 Chrome）：
 
@@ -1212,6 +1213,94 @@ ok('加量后开口问的词里，没有一个是刚背过的', again.length ===
 **产物不能当源码备份** —— 要备份就 `git stash` 或复制**源文件**。
 
 
+### 事故十一：多个对话之间**不共享**，其中一个的改动还会被静默吞掉 ⚠️ 一次"按会话分实例"
+
+用户原话：
+
+> 还有个问题是，多个对话框之间居然不是共享的
+
+（补充确认：同一个 DSH 桌面客户端里的多个对话，工作区可能相同也可能不同。
+期望是"所有对话共用一份"。）
+
+**根因**：`adapter/dsh/client.js` 里写的是
+
+```js
+const cores = new Map();
+function coreFor(sessionId) { ... }
+```
+
+**按 sessionId 一个内核**（每个对话一个 app 实例）。原意是"避免多会话互相串
+数据"，但实测（两个会话共用同一个 localStorage）坏在三处：
+
+| 现象 | 实测 |
+|---|---|
+| ① 进度不同步 | A 背了 10 个词，B 内存里还是 **0** |
+| ② 写入被吞 | B 把 dailyGoal 改成 30，磁盘上还是 **20** |
+| ③ 数据对不上 | 两个内核各持一份完整状态，最后写入的覆盖另一份 |
+
+② 之所以发生，是因为 `client-store.mjs` 有一把"只许一个写入者"的锁
+（`claimLock()`：锁新鲜且不是自己 → `readOnly = true`）。
+**每个对话一个内核 = 每个对话一个实例 id** → 第二个对话一建内核就被判只读，
+之后的 `persist()` 全部只写内存、不落盘。那把锁本来是为了"多窗口别打架"，
+结果被自己人撞上了。
+
+**修法**：**一个窗口 = 一个内核**。背单词的进度属于"这个人"，不属于某个对话，
+所以窗口里只该有一个 app 实例，所有对话的所有席位共用它。
+
+```js
+let corePromise = null;
+function coreFor() { ... }        // 本窗口唯一，忽略 sessionId
+function useCore() { ... }        // 座席用它；异步就绪，先渲染空壳
+```
+
+用 **Promise 单例**而不是直接返回实例：座席是 React 同步渲染的，而 `app.init()`
+要异步读 localStorage。存 Promise，谁先到谁等它 resolve；`init()` 结尾自己会
+`emit()`，所以先渲染的空壳会被这次 emit 填上真数据。
+
+配套的三处改动：
+
+- `usePuppet(create, deps, core)` 多收一个 `core`，`if (core)` 才建木偶 ——
+  否则第一帧 `core` 还是 null，而木偶第一行就是 `core.app`，
+  直接 `Cannot read properties of null` 把座席 render 打挂。
+- `coreFor` 里 init 失败时**清掉缓存并 rethrow**（下次调用重试），
+  再挂 `.catch(() => {})` 消费掉，免得变成 unhandled rejection。
+- 卸载时只放**这一个**内核的锁（原来是遍历 `cores.values()`）。
+
+**验证方式：断言"接线"，不是"核心逻辑"**
+
+核心逻辑早有测试（`round-control` 100 条），但这个 bug **完全不在核心逻辑里** ——
+它在"谁拿到哪个实例"这一层。所以新建 `test/multi-conversation.test.mjs`：
+物化真产物 → 拿真注册的胶囊组件 → 用一套假 React 挂两次（`conv-a` / `conv-b`）
+→ 断言两次拿到的是**同一个 app**，再从一个对话改设置、看另一个是否立刻变。
+
+回退成"每个对话一个内核"后它报的是：
+
+```
+✗ 对话 B 拿到了内核  (null)
+✗ 两个对话是**同一个内核实例**（这才是"共享"）  (两个不同实例 ← 就是用户报的问题)
+✗ 两个对话指向同一个 app（进度/设置天然共享）
+```
+
+**这次自己踩的三个脚手架坑（都不是产品问题，但都曾让我误判）**
+
+1. 假 React 的 `useState` setter 捕获了全局 `hookCursor`，异步 resolve 时游标
+   早跑到别的组件去了，于是 A 把值写进了空槽 → 看起来像"对话 A 没拿到内核"。
+   改成把 **hook 槽本身**抓住。
+2. 断言 `app.state.words` —— 但 `app.state` 是**给界面看的精简快照**，
+   `init()` 里被重新赋过值，里面没有 `words`/`mem`/`records`，内部状态在
+   `app.raw`。差点当成"内核是个空壳"。
+3. 用 grep 查源码字面量（`const cores = new Map()`、`coreFor(sessionId)`）
+   **两版都假红** —— 事故记录和反面教材就写在注释里，按字面量查必然命中。
+   最后把这两条删了：行为断言（同一实例）才是判据，grep 只留"只存在一处建
+   内核入口"这种不会误报的结构事实。
+
+**还有个操作失误值得单独记**：我写了个"忠实回退"脚本，用 `indexOf` 定边界做
+字符串切片，结果 `end` 没匹配上（注释里是**全角**括号「（异步）」，我按半角写），
+`slice(start, -1)` 一路切到文件末尾，把 `usePuppet` 到文件结尾**全删了** ——
+一个"我以为在回退"的操作把源文件截断了。
+**教训：改源文件的脚本必须先验证边界命中了没有；宁可就地单点替换，不要切片。**
+
+
 ---
 
 ## 目录速查
@@ -1223,7 +1312,7 @@ cordis.patch.yml        host 一行条目（不注册服务）
 core/  store/  ui/  adapter/dsh/    源码
 lib/                    构建产物（client.js / index.js）
 demo/                   自包含演示与截图页
-test/                   七个测试（core / plugin / demo-boot / client-activation / bundle-audit / mount / round-control）
+test/                   八个测试（core / plugin / demo-boot / client-activation / bundle-audit / mount / round-control / multi-conversation）
 tools/build.py          demo 构建
 tools/build-plugin.py   插件构建
 tools/install.py        正式安装（幂等，可 --dry-run）

@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-10T15:38:56
+ * 构建时间：2026-10-10T16:06:47
  */
 'use strict';
 
