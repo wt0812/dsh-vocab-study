@@ -101,6 +101,13 @@ export function createApp(ports = {}) {
       empty: !state.container || !Array.isArray(state.container.items) || state.container.items.length === 0,
       // 本轮是否已经跑完（用来决定"再背一轮 / 再来几个新词"要不要出现）
       roundFinished: !state.session || S.isFinished(state.session),
+      // 进度**分子**：这一个会话覆盖了多少个**不同的词**。
+      //
+      // 不能用 session.stats.answered：那个数的是"卡"，而重训会在同一轮里
+      // 再插卡（答"忘了"一个词最多再出现 2 次），20 个词走完会变成 60 ——
+      // 和"词"为单位的分母一除，环就显示「60/20」。分子分母必须同单位。
+      // 核心侧算好放这里，界面直接读，省得再往命名空间注册表里加符号。
+      covered: S.coveredCount(state.session),
       // 本轮排过的卡数（不含同轮重训插入），用于文案「这一轮 20 词」
       roundSize: (state.roundItems || []).length,
       extendedBy: state.extendCount || 0,
@@ -409,13 +416,35 @@ export function createApp(ports = {}) {
     };
     state.roundItems = merged.map((it) => ({ ...it }));
 
-    // 续上正在背的这一轮，把新词接在后面。已经背过的不重考。
+    // 续上正在背的这一轮，把新词接在后面。
     const s = state.session;
     if (!s || S.isFinished(s)) {
-      state.session = S.createSession(
+      // 上一轮**已经走完**时开新会话。这里要同时满足三件事，缺一样用户就会骂：
+      //   ① 不许重考刚背过的（用户原话：「他会给我再原来的基础上加五个，
+      //      然后从头过一遍我刚背的」）
+      //   ② 计数器要连续（底部的「今日 x/y」不能因为续背而清零）
+      //   ③ 这一轮的总量还是 25（环和底部说的是同一轮）
+      //
+      // 我第一版把队列直接缩成 fresh（5 张）—— ① 满足了，但 ② 挂了：
+      // 新会话 answered 从 0 起，底部变成「今日 0/25」，看起来像进度被清空。
+      // 正确做法是**队列保留整轮 25 个词，但把已经答过的标成已答、
+      // 游标挪到新词开头**：currentCard() 只会拿到新词（①），
+      // stats.answered 延续上一场的数（②），总量 25（③）。
+      const doneIds = new Set();
+      if (s) for (const c of s.queue) if (c.answered) doneIds.add(c.word.id);
+      const next = S.createSession(
         { items: merged, stats: state.container.stats, dayKey: key },
         sessionOpts(),
       );
+      for (const c of next.queue) if (doneIds.has(c.word.id)) c.answered = true;
+      // 游标推到第一个还没背过的卡，这样开口问的就是新词
+      next.cursor = next.queue.findIndex((c) => !c.answered);
+      if (next.cursor < 0) next.cursor = next.queue.length;
+      // 计数器要**接着上一场**，不能因为"这是新会话"就归零。
+      // 用户刚背完 20 个，点了"再来 5 个"，进度条从 0/25 重新爬是错的 ——
+      // 他看到的应该是 20/25 继续往上走。
+      next.stats.answered = Math.max(next.stats.answered, doneIds.size);
+      state.session = next;
     } else {
       const have = new Set(s.queue.map((c) => c.word.id));
       const add = fresh.filter((it) => !have.has(it.word.id));

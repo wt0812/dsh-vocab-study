@@ -60,7 +60,7 @@ CORE_EXPORTS = [
            "comebackLine", "shouldRipple"]),
     ("S", ["RETRY_GAP_MIN", "RETRY_GAP_MAX", "MODE", "RATING", "MAX_CONSECUTIVE_NEW",
            "UNDO_WINDOW_MS", "QUIZ_ERROR_THRESHOLD", "createSession", "currentCard",
-           "isFinished", "submitRating", "revealFor", "planRetry", "insertRetry",
+           "isFinished", "coveredCount", "submitRating", "revealFor", "planRetry", "insertRetry",
            "advance", "ensureNewWordCap", "undoLast", "buildQuiz", "submitQuiz",
            "humanizeConfusion", "reportFakeMastery", "pauseSession", "resumeSession",
            "snapshot", "restore"]),

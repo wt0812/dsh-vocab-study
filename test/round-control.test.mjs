@@ -128,6 +128,61 @@ console.log('\n③ 「自己往后背」（突破当天计划 N）：');
      `${answeredBefore} → ${app.state.stats.todayAnswered}`);
 }
 
+// ── ③.5 用户报的「再来五个新词，从头过一遍我刚背的」──────────
+//
+// 这是我原实现里最难看的一个 bug，而且**上面那一段测试全绿**照样让它上线了：
+// ③ 断言了"加量后容器更大 / 不重复 / 队列只增"，但从来没有一条断言说
+// 「点完加量之后，下一个开口问的词**不能**是我刚背完的」。
+//
+// 当时的实现是 `S.createSession({ items: merged })` —— merged 是"这一轮排过的
+// 全部词"（20 个旧 + 5 个新），拿它当新队列，于是用户被从头重考 20 个。
+// 用户原话：「我说再来五个新词，他会给我再原来的基础上加五个，
+// 然后从头过一遍我刚背的」。
+//
+// 所以这里刻意断言**队列游标之后、还没答过的那些词** —— 那才是"接下来会问什么"，
+// 光看 container.items 永远看不出来（它本来就该包含旧词）。
+console.log('\n③.5 「再来 5 个新词」不许重考刚背过的：');
+{
+  const app = await freshApp();
+  runRound(app, S.RATING.GOOD); // 走完第一轮
+
+  const learned = new Set();
+  for (const c of app.state.session.queue) if (c.answered) learned.add(c.word.id);
+  ok('第一轮走完后确实背过一批词', learned.size > 3, `背过 ${learned.size} 个`);
+
+  const before = app.state.covered;
+  app.extendRound(5);
+  const s = app.state.session;
+
+  // "接下来会问什么" = 游标之后、尚未作答的卡
+  const upcoming = s.queue.slice(s.cursor).filter((c) => !c.answered).map((c) => c.word.id);
+  const again = upcoming.filter((id) => learned.has(id));
+  ok('加量后开口问的词里，没有一个是刚背过的', again.length === 0,
+     `要问 ${upcoming.length} 张，其中 ${again.length} 张是旧的：${again.slice(0, 5).join(', ')}`);
+  ok('加量后确实只剩新词要问（不多不少 5 张）', upcoming.length === 5,
+     `实得 ${upcoming.length} 张`);
+  ok('游标被推到第一个没背过的卡（而不是 0）', s.cursor > 0, `cursor=${s.cursor}`);
+
+  // 计数器不能因为"开了新会话"而清零 —— 用户会觉得进度被吞了
+  ok('加量后进度不倒退（环不回到 0）', app.state.covered >= before,
+     `${before} → ${app.state.covered}`);
+  ok('进度分子分母同单位（词对词，不是 60/20）',
+     app.state.covered <= s.plannedSize,
+     `covered=${app.state.covered} planned=${s.plannedSize}`);
+
+  // 真把新词背完，再点一次
+  let n = 0;
+  while (!app.state.roundFinished && n < 30) { app.rate(S.RATING.KNOWN); app.next(); n++; }
+  const learned2 = new Set();
+  for (const c of app.state.session.queue) if (c.answered) learned2.add(c.word.id);
+  app.extendRound(5);
+  const s2 = app.state.session;
+  const up2 = s2.queue.slice(s2.cursor).filter((c) => !c.answered).map((c) => c.word.id);
+  ok('第二次加量同样不重考', up2.filter((id) => learned2.has(id)).length === 0,
+     `要问 ${up2.length} 张`);
+  ok('第二次加量也是 5 张新词', up2.length === 5, `实得 ${up2.length} 张`);
+}
+
 // ── ④ 安全阀：仍然自动触发，但用户能自己放行 ────────────────
 //
 // 注意这里断言的是 state.newGate（**每次快照实时重算**），不是

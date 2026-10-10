@@ -123,6 +123,26 @@ export function isFinished(session) {
 }
 
 /**
+ * 这场会话"覆盖了多少个**不同的词**"—— 界面上环和进度的**分子**。
+ *
+ * 为什么不能用 `session.stats.answered`：那个数的是**卡**，而答"忘了/模糊"
+ * 会在同一轮里再插重训卡（§5.5，一个词最多再出现 2 次）。于是 20 个词走完
+ * 会是 answered = 60，而分母 plannedSize/containerSize 数的是**词**（20），
+ * 界面上的环就会显示「60/20」这种东西 —— 分子分母不是一个单位。
+ *
+ * `stats.answered` 的原义（签到判定 §…… 用它）保留不动，只是不用来当进度条。
+ */
+export function coveredCount(session) {
+  if (!session || !Array.isArray(session.queue)) return 0;
+  const seen = new Set();
+  for (const c of session.queue) {
+    if (!c || !c.answered || !c.word) continue;
+    seen.add(c.word.id);
+  }
+  return seen.size;
+}
+
+/**
  * 提交自评。这是核心动作：它决定这个词接下来发生什么。
  *
  * @returns 揭晓信息 payload { word, memory, reveal, plan }

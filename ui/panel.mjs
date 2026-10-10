@@ -183,7 +183,10 @@ export function createPanel(app, ctx = {}) {
     else renderSettings(body, st, app);
 
     // 底部：连击 + 今日进度
-    const done = st.container?.done ?? (st.session ? st.session.stats.answered : 0);
+    // 分子用 st.covered（覆盖了多少个**不同的词**），不用 session.stats.answered
+    // —— 后者数的是"卡"，重训会让 20 个词变成 60，和"词"为单位的分母一除
+    // 就是「60/20」。详见 core/app.mjs 里 covered 那段注释。
+    const done = st.container?.done ?? (typeof st.covered === 'number' ? st.covered : (st.session ? st.session.stats.answered : 0));
     const size = st.container?.stats?.containerSize ?? st.session?.plannedSize ?? 0;
     const combo = st.combo?.combo || 0;
     mount(
@@ -372,7 +375,13 @@ export function createPanel(app, ctx = {}) {
     // 还停在上一轮的数字，于是环和「今天已背」互相矛盾 —— 实测：重背后答 1 个，
     // 环显示 1，而今日已背显示 6。用户会以为数字坏了。
     // 现在两件事各归各位：环 = 这一轮（session），KPI = 今天（stats）。
-    const roundDone = st.session ? st.session.stats.answered : (st.container?.done ?? 0);
+    //
+    // 分子同样必须用 st.covered（数**词**）而不是 session.stats.answered（数**卡**）：
+    // 重训卡会让 20 个词走成 answered = 60，而分母是 20 → 环显示「60/20」。
+    // 分子分母不同单位，这个环就永远在撒谎。
+    const roundDone = typeof st.covered === 'number'
+      ? st.covered
+      : (st.session ? st.session.stats.answered : (st.container?.done ?? 0));
     const roundSize = st.session?.plannedSize ?? st.container?.stats?.containerSize ?? 0;
     const pct = roundSize ? Math.min(1, roundDone / roundSize) : 0;
 
