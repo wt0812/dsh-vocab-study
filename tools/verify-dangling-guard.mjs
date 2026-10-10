@@ -11,8 +11,13 @@
 //   而 `M.foo` 可能是合法的局部对象（比如某个 `const M = {...}`），
 //   所以必须先查"前缀是否被声明"，不能只看成员名。
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const P = String.raw`F:\DeepSeek Harness\projects\vocab-study\lib\client.js`;
+// 相对本文件定位仓库根，这样换台机器 / 换个目录也能跑
+// （原来写死了作者本机的 F:\DeepSeek Harness\projects\vocab-study）。
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const P = path.join(ROOT, 'lib', 'client.js');
 const good = fs.readFileSync(P, 'utf8');
 const bad = good.replace(
   /const blocked = shouldBlockNew\(todayStats\(\)\);/,

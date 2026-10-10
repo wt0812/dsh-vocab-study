@@ -8,7 +8,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 ## 它长什么样
 
-**① 输入框旁那颗胶囊**（`conversation.input.right`，排在「权限」和「模型」之间）：
+**① 输入框旁那颗胶囊**（`conversation.input.right`，排在输入框右侧控件的最右边）：
 
 ![输入框旁的胶囊](assets/screenshot-1-capsule.png)
 
@@ -18,12 +18,12 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 位置 | 内容 |
 |---|---|
-| `conversation.input.right` | 一颗胶囊 `今天第一词`，排在「权限」和「模型」之间 |
+| `conversation.input.right` | 一颗胶囊 `今天第一词`，排在输入框右侧控件的最右边（`order = 45`，大于右侧切换器的 40） |
 | `sidebar.right.pane.tab` | 一个叫「今日背单词」的标签页，四个页签：今日 / 进度 / 生词本 / 设置 |
 
-> **截图待补**：上面两张图对应 `screenshots.json` 里声明的路径。
-> 图片放进 `assets/`（文件名必须是 `screenshot-1-capsule.png` 和 `screenshot-2-panel.png`）后即可显示；
-> 市场详情页也会用同一份声明（上游 `probe-screenshots.mjs` 从仓库 HEAD 实时读取，不需要另外提 PR）。
+> **截图**：上面两张图就在 `assets/` 里（`screenshot-1-capsule.png`、`screenshot-2-panel.png`），
+> 同时由 `screenshots.json` 声明，市场详情页会用同一份声明
+> （上游 `probe-screenshots.mjs` 从仓库 HEAD 实时读取，不需要另外提 PR）。
 
 不用它的日子它什么都不做。面板**永远不会自己弹出来**（这是刻意的，见下面「12 条硬约束」）。
 

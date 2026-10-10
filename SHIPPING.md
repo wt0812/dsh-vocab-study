@@ -13,11 +13,28 @@
 | 1. `package.json` 声明 `dsh.bundle`（收录 CI 的硬条件） | ✅ |
 | 2. `dsh.client.platform = "web"` + `exports["./client"]` | ✅ |
 | 3. 明确许可证（MIT） | ✅ |
-| 4. 公开 GitHub 仓库 | ⬜ 待推送 |
-| 5. 仓库加 `dsh-plugin` topic | ⬜ |
+| 4. 公开 GitHub 仓库 | ✅ `wt0812/dsh-vocab-study` |
+| 5. 仓库加 `dsh-plugin` topic | ✅ |
 | 6. README 含 `dsh plugin --profile web add <包名>` 安装命令 | ✅ |
-| 7. **仓库存在满 1 天**（CI 自动检查） | ⬜ 推送后才开始计时 |
-| 8. 提 PR：`data/plugins/wt0812__dsh-vocab-study.yml` | ⬜ 满 1 天后 |
+| 7. **仓库存在满 1 天**（CI 自动检查） | ✅ 创建于 2026-10-09，已满 |
+| 8. 提 PR：`data/plugins/wt0812__dsh-vocab-study.yml` | ⬜ 待提 |
+
+**上游 CI 到底查什么**（读的是 `scripts/check-submission.mjs`，不是猜的 —— 它只查 4 条）：
+仓库里有 `package.json` 声明 `dsh.bundle`、仓库满 1 天、未归档、不是 DSH 本体。
+**没有提交数门槛**（上游 2026-09-03 已取消 `MIN_COMMITS`）。
+单个 PR 最多 3 条条目（我们提 1 条）。
+
+**条目的字段规则**（读的是 `scripts/lib/entries.mjs`）：
+允许的键只有 `url` / `name` / `category` / `description` / `tarball`，
+**多一个键就报 unknown field 被拒**；文件名必须等于 `url` 推出的 slug；
+`name` 写成 `owner/repo` 时必须与 `url` 指向同一个仓库；`category` 必须在官方列表里。
+`npm:` 字段**不要写** —— 上游从 `data/npm-map.json` 自动采集。
+
+本地先验一遍（用上游同一个解析器 js-yaml）：
+
+```sh
+node tools/verify-market-entry.mjs <一个装了 js-yaml 的目录>
+```
 
 ---
 

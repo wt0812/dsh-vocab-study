@@ -14,8 +14,11 @@ import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = path.resolve(process.argv[2] || '.');
-const DEPLOY =
-  'C:\\Users\\21653\\.dsh\\profiles\\desktop\\node_modules\\dsh-vocab-study\\lib\\client.js';
+// 部署副本：默认指向本机 desktop profile，可用环境变量覆盖
+// （原来写死了作者本机的 C:\Users\21653\...）。
+const DEPLOY = process.env.DSH_DEPLOY_CLIENT || path.join(
+  process.env.USERPROFILE || process.env.HOME || '',
+  '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-vocab-study', 'lib', 'client.js');
 
 // 模式：直接跑（默认），或把自己再 spawn 一次以便隔离
 if (process.argv[3] === '--child') {

@@ -16,7 +16,10 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
-const DEPLOY_ROOT = 'C:\\Users\\21653\\.dsh\\profiles\\desktop\\node_modules';
+// 部署目录：默认指向本机 desktop profile，可用环境变量覆盖
+// （原来写死了作者本机的 C:\Users\21653\...）。
+const DEPLOY_ROOT = process.env.DSH_DEPLOY_ROOT
+  || path.join(process.env.USERPROFILE || process.env.HOME || '', '.dsh', 'profiles', 'desktop', 'node_modules');
 
 // 记录"拿不到的真依赖"。声明必须在所有函数之前：ESM 里 const 也是 TDZ，
 // 放在文件后面的话，函数先被调用就会炸（这一版我连炸了三次）。
