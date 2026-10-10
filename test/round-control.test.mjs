@@ -218,6 +218,37 @@ console.log('\n⑦ 回归锁：渲染验证发现不了的两个 bug：');
   const added2 = idsA2.filter((x) => !idsB2.includes(x));
   ok('放行后 extendRound 真的能加进新词', added2.length > 0, `新增 ${added2.length} 个`);
 
+  // ── 加量必须**恰好**加 batch 个，而且不重复 ────────────────────
+  // 用户报：「我背完一轮之后，我点击再来五个，结果下面显示30个」
+  //        「我点击再来五个之后，出现的单词是重复的」
+  //
+  // 根因：老写法是「用更大的 N 重建容器，再拿结果去重」。但走完一轮后 mem
+  // 已经变了 —— 那批词从"新词池"迁进了"到期复习池"，重建出来的大部分
+  // **不是**它们本身，于是去重几乎全部失灵。实测一次点击多塞 25 个条目、
+  // session 队列里 40 个重复。
+  // 修法：把已排过的词作为 `exclude` 交给 buildDailyContainer（排除发生在
+  // 池子源头），并且只建设 batch 个 + 严格上限。
+  ok('放行后一次加量恰好加 5 个（不是一大批）', added2.length === 5, `新增 ${added2.length} 个`);
+  const roundIds2 = app.raw.roundItems.map((it) => it.word.id);
+  ok('加量后本轮条目数 = 原先 + 5（底部那个数字不会跳）',
+     roundIds2.length === idsB2.length + 5, `${idsB2.length} → ${roundIds2.length}`);
+  ok('加量后本轮里没有重复的词（用户报「出现的是重复的」）',
+     new Set(roundIds2).size === roundIds2.length,
+     `重复 ${roundIds2.length - new Set(roundIds2).size} 个`);
+  ok('加量加进来的词确实是没排过的',
+     added2.every((x) => !idsB2.includes(x)) && new Set(added2).size === added2.length);
+
+  // 连点两次也要各加 5 个，不能越加越多
+  const beforeThird = app.raw.roundItems.map((it) => it.word.id);
+  app.extendRound(5);
+  const afterThird = app.raw.roundItems.map((it) => it.word.id);
+  ok('再点一次仍然恰好加 5 个（不会越加越多）',
+     afterThird.length === beforeThird.length + 5,
+     `${beforeThird.length} → ${afterThird.length}`);
+  ok('连点两次后本轮依然无重复',
+     new Set(afterThird).size === afterThird.length,
+     `重复 ${afterThird.length - new Set(afterThird).size} 个`);
+
   // bug B：环（这一轮）与 KPI（今天）口径必须分开
   const app2 = await freshApp();
   runRound(app2, S.RATING.KNOWN);

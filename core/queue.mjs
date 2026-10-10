@@ -135,17 +135,29 @@ export const TIER = { REVIEW: 1, PERSONAL: 2, NEW: 3 };
  * @param mem      记忆表 { wordId: memoryState }
  * @param opts     { N, gapDays, balance ∈ [0,1] (0=先保住会的, 1=多背点新的),
  *                   now, collections(启用的词库标签), personal(生词本 id 集合),
- *                   profile(用户画像/已毕业词库), theta }
+ *                   profile(用户画像/已毕业词库), theta,
+ *                   exclude(Set<wordId>：本轮已经排过的词，一律不再出现) }
  */
 export function buildDailyContainer(words, mem, opts = {}) {
   const now = opts.now ?? Date.now();
   const N = opts.N ?? 20;
   const balance = clamp01(opts.balance ?? 0.5);
   const items = [];
+  // 已在本轮排过的词。**排除要发生在所有池子里**，不能等选出结果再过滤。
+  //
+  // ⚠️ 为什么必须在这里排除（用户报「点再来 5 个出现重复的词」）：
+  // 「再来 5 个新词」原来是用更大的 N 重建一遍、再拿结果去重。但走完一轮后
+  // mem 已经变了 —— 那 20 个词从"新词池"进了"到期复习池"，重建出来的
+  // 大部分**不是**它们本身，于是去重几乎全部失灵：实测 20 个词的一轮，
+  // 点一次「再来 5 个」后容器变成 45 个条目、session 队列里 40 个是重复的。
+  // 从池子源头排除，才能保证"多要的 5 个"真的是没排过的。
+  const exclude = opts.exclude instanceof Set ? opts.exclude : null;
+  const skip = (w) => !!(exclude && exclude.has(w.id));
 
   // 第 1 层：到期复习词 —— 不可挤占，防遗忘的地基
   const duePool = [];
   for (const w of words) {
+    if (skip(w)) continue;
     const m = mem[w.id] || M.newMemory({}, now);
     if (!M.isDue(m, now, opts.theta) && !M.isWeak(m, now, opts.theta)) continue;
     duePool.push({ word: w, mem: m, tier: TIER.REVIEW, overdueDays: (now - M.dueAt(m, now, opts.theta)) / DAY_MS });
@@ -161,6 +173,7 @@ export function buildDailyContainer(words, mem, opts = {}) {
   const personalPool = [];
   for (const w of words) {
     if (!w.personal) continue;
+    if (skip(w)) continue;
     const m = mem[w.id] || M.newMemory({}, now);
     if (M.isDue(m, now, opts.theta)) continue; // 已在第 1 层
     personalPool.push({ word: w, mem: m, tier: TIER.PERSONAL });
@@ -171,6 +184,7 @@ export function buildDailyContainer(words, mem, opts = {}) {
   const newPool = [];
   for (const w of words) {
     if (w.personal) continue;
+    if (skip(w)) continue;
     if (opts.collections && !opts.collections.includes(w.collection)) continue;
     const m = mem[w.id];
     if (m && (m.encodeCount > 0 || M.isDue(m, now, opts.theta))) continue; // 学过的不算新
@@ -239,9 +253,12 @@ export function buildDailyContainer(words, mem, opts = {}) {
     used++;
   }
   // 5) 实在凑不满，把 5% 安全垫里最弱的词拉进来轮转（§5.6：绝不宣称「全部掌握」）
+  //    注意：安全垫是从**已学过**的词里挑的，所以必须也过一遍 exclude ——
+  //    否则「再来 5 个新词」会把刚从"新词池"迁到"复习池"的那批又拉回来。
   if (used < N) {
     for (const it of cushion.weakest) {
       if (used >= N) break;
+      if (skip(it.word)) continue;
       if (items.some((x) => x.word.id === it.word.id)) continue;
       items.push(it);
       used++;

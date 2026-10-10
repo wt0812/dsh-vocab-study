@@ -991,7 +991,7 @@ body { margin: 0; background: #14120F; }
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-10T10:55:40
+ * 构建时间：2026-10-10T11:30:46
  */
 'use strict';
 
@@ -3014,17 +3014,29 @@ const TIER = { REVIEW: 1, PERSONAL: 2, NEW: 3 };
  * @param mem      记忆表 { wordId: memoryState }
  * @param opts     { N, gapDays, balance ∈ [0,1] (0=先保住会的, 1=多背点新的),
  *                   now, collections(启用的词库标签), personal(生词本 id 集合),
- *                   profile(用户画像/已毕业词库), theta }
+ *                   profile(用户画像/已毕业词库), theta,
+ *                   exclude(Set<wordId>：本轮已经排过的词，一律不再出现) }
  */
 function buildDailyContainer(words, mem, opts = {}) {
   const now = opts.now ?? Date.now();
   const N = opts.N ?? 20;
   const balance = clamp01(opts.balance ?? 0.5);
   const items = [];
+  // 已在本轮排过的词。**排除要发生在所有池子里**，不能等选出结果再过滤。
+  //
+  // ⚠️ 为什么必须在这里排除（用户报「点再来 5 个出现重复的词」）：
+  // 「再来 5 个新词」原来是用更大的 N 重建一遍、再拿结果去重。但走完一轮后
+  // mem 已经变了 —— 那 20 个词从"新词池"进了"到期复习池"，重建出来的
+  // 大部分**不是**它们本身，于是去重几乎全部失灵：实测 20 个词的一轮，
+  // 点一次「再来 5 个」后容器变成 45 个条目、session 队列里 40 个是重复的。
+  // 从池子源头排除，才能保证"多要的 5 个"真的是没排过的。
+  const exclude = opts.exclude instanceof Set ? opts.exclude : null;
+  const skip = (w) => !!(exclude && exclude.has(w.id));
 
   // 第 1 层：到期复习词 —— 不可挤占，防遗忘的地基
   const duePool = [];
   for (const w of words) {
+    if (skip(w)) continue;
     const m = mem[w.id] || M.newMemory({}, now);
     if (!M.isDue(m, now, opts.theta) && !M.isWeak(m, now, opts.theta)) continue;
     duePool.push({ word: w, mem: m, tier: TIER.REVIEW, overdueDays: (now - M.dueAt(m, now, opts.theta)) / DAY_MS });
@@ -3040,6 +3052,7 @@ function buildDailyContainer(words, mem, opts = {}) {
   const personalPool = [];
   for (const w of words) {
     if (!w.personal) continue;
+    if (skip(w)) continue;
     const m = mem[w.id] || M.newMemory({}, now);
     if (M.isDue(m, now, opts.theta)) continue; // 已在第 1 层
     personalPool.push({ word: w, mem: m, tier: TIER.PERSONAL });
@@ -3050,6 +3063,7 @@ function buildDailyContainer(words, mem, opts = {}) {
   const newPool = [];
   for (const w of words) {
     if (w.personal) continue;
+    if (skip(w)) continue;
     if (opts.collections && !opts.collections.includes(w.collection)) continue;
     const m = mem[w.id];
     if (m && (m.encodeCount > 0 || M.isDue(m, now, opts.theta))) continue; // 学过的不算新
@@ -3118,9 +3132,12 @@ function buildDailyContainer(words, mem, opts = {}) {
     used++;
   }
   // 5) 实在凑不满，把 5% 安全垫里最弱的词拉进来轮转（§5.6：绝不宣称「全部掌握」）
+  //    注意：安全垫是从**已学过**的词里挑的，所以必须也过一遍 exclude ——
+  //    否则「再来 5 个新词」会把刚从"新词池"迁到"复习池"的那批又拉回来。
   if (used < N) {
     for (const it of cushion.weakest) {
       if (used >= N) break;
+      if (skip(it.word)) continue;
       if (items.some((x) => x.word.id === it.word.id)) continue;
       items.push(it);
       used++;
@@ -4376,43 +4393,78 @@ function createApp(ports = {}) {
    * 为什么不一次给很多：用户说的是"能不能自己往后背"，要的是**由他决定继续**，
    * 不是系统一口气塞 100 个给他。一次 5 个，想继续再点。
    */
+  /**
+   * 「再来 5 个新词」：本轮再多排 step 个**没排过**的词，接在正在背的这一轮后面。
+   *
+   * ⚠️ 这里原来错得很厉害（用户报「点完显示 30 个」「出现的单词是重复的」）：
+   * 老写法是「用更大的 N（base + step*next）重建一遍容器，再拿结果去重」。
+   * 但走完一轮后 mem 已经变了 —— 那 20 个词从"新词池"迁进了"到期复习池"，
+   * 于是重建出来的大部分**不是**它们本身，去重几乎全部失灵。实测：
+   *   一轮 20 个词 → 点一次「再来 5 个」→ 容器 45 个条目、session 队列 40 个重复。
+   *
+   * 现在改成：把「本轮已排过的词」作为 exclude 交给 buildDailyContainer，
+   * **只建设 step 个**。排除发生在池子源头（见 queue.mjs 的 skip），
+   * 所以学过的词不会从复习池绕回来；再叠一层严格上限，凑不满就凑不满。
+   */
   function extendRound(batch = 5) {
-    const base = state.container?.autoN || state.container?.baseN || state.settings.dailyGoal || 20;
-    const step = Math.max(1, Math.min(20, Math.round(batch)));
-    const next = (state.extendCount || 0) + 1;
-    state.extendCount = next;
-    const targetN = base + step * next;
+    const step = Math.max(1, Math.min(20, Math.round(batch) || 5));
     const key = state.dayKey || Q.dayKey(now());
-    // 已经排过队的词不再重复加入，所以第二次点只会补进"新的"那 5 个
-    const already = new Set((state.roundItems || []).map((it) => it.word.id));
+
+    const prev = Array.isArray(state.roundItems) ? state.roundItems : [];
+    const exclude = new Set(prev.map((it) => it.word.id).filter(Boolean));
+
     const built = Q.buildDailyContainer(personalToWords(), state.mem, {
-      N: targetN,
+      N: step,
       gapDays: state.container?.gapDays ?? gapDays(),
       balance: state.settings.balance,
       now: now(),
       collections: state.settings.collections,
       todayStats: todayStats(),
+      // ⚠️ 这里**必须**沿用设置的闸门状态，不能写死成 true。
+      // 我曾写成 `allowMoreNew: true`（理由是"用户亲手按了按钮"），结果
+      // test/round-control.test.mjs 第 ⑦ 节立刻变红 —— 那条锁的是
+      // 「闸门关着时 extendRound 不该硬塞新词」，而界面在闸门关着时
+      // 根本不显示这个按钮。硬写 true 等于让这个函数**绕过安全阀**，
+      // 那是产品决策，不该由修 bug 顺手改掉。
       allowMoreNew: !!state.settings.allowMoreNew,
       seed: key,
       order: state.settings.order,
+      exclude,
     });
-    const fresh = built.items.filter((it) => !already.has(it.word.id));
-    const merged = [...(state.roundItems || []), ...fresh.map((it) => ({ ...it }))];
+
+    // 严格只要没排过的，并且**不超过 step**。
+    const seen = new Set(exclude);
+    const fresh = [];
+    for (const it of built.items) {
+      const id = it.word && it.word.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      fresh.push({ ...it });
+      if (fresh.length >= step) break;
+    }
+    if (!fresh.length) return state.container;
+
+    const merged = [...prev, ...fresh];
+    state.extendCount = (state.extendCount || 0) + 1;
     state.container = {
       ...state.container,
       ...built,
       items: merged,
-      stats: { ...built.stats, containerSize: targetN, size: merged.length },
+      stats: { ...built.stats, containerSize: merged.length, size: merged.length },
       dayKey: key,
       baseN: state.settings.dailyGoal,
-      autoN: base,
+      autoN: state.container?.autoN || state.container?.baseN || state.settings.dailyGoal,
       extendedBy: state.extendCount,
     };
     state.roundItems = merged.map((it) => ({ ...it }));
-    // 续上正在背的这一轮：保留已有卡（不重考），把新词接在后面
+
+    // 续上正在背的这一轮，把新词接在后面。已经背过的不重考。
     const s = state.session;
     if (!s || S.isFinished(s)) {
-      state.session = S.createSession({ ...state.container, dayKey: key }, sessionOpts());
+      state.session = S.createSession(
+        { items: merged, stats: state.container.stats, dayKey: key },
+        sessionOpts(),
+      );
     } else {
       const have = new Set(s.queue.map((c) => c.word.id));
       const add = fresh.filter((it) => !have.has(it.word.id));
@@ -4421,7 +4473,7 @@ function createApp(ports = {}) {
           { items: add, stats: built.stats, dayKey: key }, sessionOpts(),
         ).queue;
         for (const c of extra) s.queue.push(c);
-        // 同上：本轮总量要跟着队列一起长，否则环会说"这一轮已经完了"
+        // 本轮总量要跟着队列一起长，否则环会说"这一轮已经完了"
         s.plannedSize = Math.max(s.plannedSize || 0, s.queue.length);
       }
     }
@@ -5636,6 +5688,23 @@ function injectCore(core) {
   return setCore(core);
 }
 
+/**
+ * 词库 id → 显示名（"cet6" → "六级"）。
+ *
+ * 为什么专门抽一个：用户报「我主页今日这里并没有显示我用的是哪个词库，
+ * 这样我就不知道我到底用的是哪个」。换词库之后尤其需要 —— 界面不说是哪本，
+ * 用户就无从判断刚才那次换库到底成没成。
+ *
+ * 名字取不到就退回 id 本身：宁可能看到一个 "cet6"，也不要空着。
+ */
+function collectionLabel(state) {
+  const { library: L } = getCore();
+  const id = (state && state.settings && state.settings.collections && state.settings.collections[0]) || '';
+  if (!id) return '';
+  const meta = (L.COLLECTIONS || {})[id];
+  return (meta && meta.name) || id;
+}
+
 /** 记忆保持曲线：一条线证明「按排期走」比「不管它」强（§7.5 证据②）。 */
 function curveSvg(curve) {
   const W = 300;
@@ -6134,7 +6203,7 @@ function renderWeeklyReport(root, report) {
   );
 }
 
-return { injectCore, renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap };
+return { injectCore, renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap, collectionLabel };
 })();
 
 // ═══════════ ui/panel.mjs → UI_PANEL ═══════════
@@ -6150,6 +6219,7 @@ const renderVocab = VOCAB_CORE.UI_PAGES.renderVocab;
 const renderSettings = VOCAB_CORE.UI_PAGES.renderSettings;
 const renderWeeklyReport = VOCAB_CORE.UI_PAGES.renderWeeklyReport;
 const heatmap = VOCAB_CORE.UI_PAGES.heatmap;
+const collectionLabel = VOCAB_CORE.UI_PAGES.collectionLabel;
 // vocab-study / ui / panel.mjs
 // 学习面板：今日 / 进度 / 生词本 / 设置。
 //
@@ -6296,8 +6366,16 @@ function createPanel(app, ctx = {}) {
       el('button', { class: 'vs-iconbtn', title: '收起（Esc）', 'aria-label': '收起', onclick: () => ctx.onClose?.() }, '✕'),
     );
 
-    // 一行灰字：离线 / 只读 / 另一个窗口正在学 —— 全部不解释（§14.5）
+    // 一行灰字：词库 / 离线 / 只读 / 另一个窗口正在学 —— 全部不解释（§14.5）
+    //
+    // ⚠️ 词库名必须放在**第一个**。用户报「我主页今日这里并没有显示我用的是
+    // 哪个词库，这样我就不知道我到底用的是哪个」—— 这条灰字原来只说"离线模式"，
+    // 用户换完库回到今日页，界面上没有任何东西能告诉他换成了没有。
+    // 词库名比"离线模式"重要得多，所以排在最前面（窄侧栏会被省略号截断时，
+    // 留下来的也是词库名）。
     const banners = [];
+    const libName = collectionLabel(st);
+    if (libName) banners.push(`词库 · ${libName}`);
     if (st.readOnly) banners.push('另一个窗口正在学');
     if (st.offline) banners.push('离线模式 · 用内置词表');
     else if (st.banner) banners.push(st.banner);

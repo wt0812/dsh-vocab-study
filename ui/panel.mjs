@@ -10,7 +10,7 @@
 // 并写入 DP 模型 —— 静默污染学习记录。
 
 import { el, mount, clear, setText, focusSelf, prefersReducedMotion } from './dom.mjs';
-import { renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap } from './pages.mjs';
+import { renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap, collectionLabel } from './pages.mjs';
 
 const TABS = [
   ['today', '今日'],
@@ -147,8 +147,16 @@ export function createPanel(app, ctx = {}) {
       el('button', { class: 'vs-iconbtn', title: '收起（Esc）', 'aria-label': '收起', onclick: () => ctx.onClose?.() }, '✕'),
     );
 
-    // 一行灰字：离线 / 只读 / 另一个窗口正在学 —— 全部不解释（§14.5）
+    // 一行灰字：词库 / 离线 / 只读 / 另一个窗口正在学 —— 全部不解释（§14.5）
+    //
+    // ⚠️ 词库名必须放在**第一个**。用户报「我主页今日这里并没有显示我用的是
+    // 哪个词库，这样我就不知道我到底用的是哪个」—— 这条灰字原来只说"离线模式"，
+    // 用户换完库回到今日页，界面上没有任何东西能告诉他换成了没有。
+    // 词库名比"离线模式"重要得多，所以排在最前面（窄侧栏会被省略号截断时，
+    // 留下来的也是词库名）。
     const banners = [];
+    const libName = collectionLabel(st);
+    if (libName) banners.push(`词库 · ${libName}`);
     if (st.readOnly) banners.push('另一个窗口正在学');
     if (st.offline) banners.push('离线模式 · 用内置词表');
     else if (st.banner) banners.push(st.banner);

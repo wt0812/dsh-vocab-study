@@ -127,6 +127,13 @@ DRIVER = r"""
         setTimeout(step, 25); return;
       }
       results.push({ step: '面板已打开', s: snap(app) });
+      // 主页必须自报"现在用的是哪本词库"。
+      // 用户原话：「我主页，就是今日这里并没有显示我用的是哪个词库，
+      // 这样我就不知道我到底用的是哪个哎」。
+      results.push({ step: '主页头部灰字自报词库', banner: (function(){
+        var b = document.querySelector('.vs-panel .vs-banner');
+        return b ? String(b.textContent).trim() : null;
+      })() });
       phase = 'speak'; setTimeout(step, 60); return;
     }
     // ── 播放键：用户报「单词右边的播放键是无效的」────────────────
@@ -180,8 +187,15 @@ DRIVER = r"""
       phase = 'extend1'; setTimeout(step, 80); return;
     }
     if (phase === 'extend1'){
+      // ⚠️ 这个阶段的闸门**是关着的**（上一轮全答"忘了"→ 答错率过高），
+      //    所以界面**故意不显示**「再来 5 个新词」，findBtn 返回 null。
+      //    我第一版把"只加 5 个"的断言挂在这里，点了一个 null，
+      //    报出"新增 0 个"的假 FAIL —— 断言挂错了阶段。
+      //    真正的加量发生在**用户放行之后**（下面的 extend2）。
       var b2 = findBtn('再来 5 个新词');
       results.push({ step: '存在「再来 5 个新词」', found: !!b2 });
+      results.push({ step: '此时闸门状态（决定按钮该不该出现）',
+                     gateClosed: app.state.newGate ? app.state.newGate.closed : null });
       if (b2) click(b2);
       results.push({ step: '点「再来 5 个新词」后', s: snap(app) });
       phase = 'gate'; setTimeout(step, 80); return;
@@ -204,20 +218,58 @@ DRIVER = r"""
         results.push({ step: '放行后给出的是否是新卡',
                        card: st.card ? st.card.word.id : null,
                        wasJustAnswered: st.card ? !!back[st.card.word.id] : null });
-        phase = 'extend2'; setTimeout(step, 80);
+        // ⚠️ 放行之后界面**立刻就有卡**（这是放行修复的成果），所以此刻
+        //    还在背词状态，「再来 5 个新词」属于"这一轮走完了"那个界面。
+        //    必须先走完这一轮，才能真的看到并点到那个按钮。
+        //    （我第一版直接在这里找按钮，found=false，报了个"新增 0 个"的假 FAIL。）
+        phase = 'finish3'; setTimeout(step, 80);
       }, 120);
       return;
     }
+    if (phase === 'finish3'){
+      if (document.querySelector('#vs-card')) finishRound(app);
+      else results.push({ step: '放行后没有词卡，跳过本步' });
+      phase = 'extend2'; setTimeout(step, 80); return;
+    }
     if (phase === 'extend2'){
+      // 这里才是用户真正的操作路径：闸门被自己放行 → 看到「再来 5 个新词」→ 点它。
+      // 用户报的两条都锁在这：① 点完下面显示 30 个 ② 出现的词是重复的。
       var b3 = findBtn('再来 5 个新词');
       var beforeIds = (app.state.container ? app.state.container.items : []).map(function(i){ return i.word.id; });
+      var roundBefore = (app.raw.roundItems || []).map(function(i){ return i.word.id; });
+      results.push({ step: '加量前的状态', found: !!b3,
+                     gateClosed: app.state.newGate ? app.state.newGate.closed : null,
+                     allowMoreNew: app.state.settings.allowMoreNew,
+                     itemsBefore: beforeIds.length, roundBefore: roundBefore.length,
+                     roundFinished: app.state.roundFinished,
+                     // 找不到按钮时最该知道的事：此刻界面上到底有哪些按钮？
+                     // 上一版我在这里报了"新增 0 个"的假 FAIL —— 按钮根本不在，
+                     // 是断言挂错了阶段，不是产品有问题。
+                     buttonsNow: (function(){
+                       var all = document.querySelectorAll('.vs-panel button, .vs-panel a');
+                       var arr = [];
+                       for (var i = 0; i < all.length; i++) arr.push(String(all[i].textContent || '').trim().slice(0, 14));
+                       return arr;
+                     })() });
       if (b3) click(b3);
-      var ids = (app.state.container ? app.state.container.items : []).map(function(i){ return i.word.id; });
-      var seen = {}, dup = 0;
-      ids.forEach(function(x){ if (seen[x]) dup++; seen[x] = 1; });
-      results.push({ step: '第二次加量后', s: snap(app) });
-      results.push({ step: '加量不重复', total: ids.length, unique: Object.keys(seen).length, dup: dup });
-      phase = 'swap'; setTimeout(step, 80); return;
+      setTimeout(function(){
+        var ids = (app.state.container ? app.state.container.items : []).map(function(i){ return i.word.id; });
+        var roundAfter = (app.raw.roundItems || []).map(function(i){ return i.word.id; });
+        var prevSet = {};
+        roundBefore.forEach(function(x){ prevSet[x] = 1; });
+        var added = roundAfter.filter(function(x){ return !prevSet[x]; });
+        var seen = {}, dup = 0;
+        ids.forEach(function(x){ if (seen[x]) dup++; seen[x] = 1; });
+        var rseen = {}, rdup = 0;
+        roundAfter.forEach(function(x){ if (rseen[x]) rdup++; rseen[x] = 1; });
+        results.push({ step: '第二次加量后', s: snap(app) });
+        results.push({ step: '加量不重复', total: ids.length, unique: Object.keys(seen).length, dup: dup });
+        results.push({ step: '加量只加 5 个', itemsBefore: beforeIds.length, itemsAfter: ids.length,
+                       roundBefore: roundBefore.length, roundAfter: roundAfter.length,
+                       added: added.length, dupInRound: rdup });
+        phase = 'swap'; setTimeout(step, 80);
+      }, 150);
+      return;
     }
     if (phase === 'swap'){
       // 此刻界面已经因为「再来 5 个新词」回到有卡状态，所以这里只查两件
@@ -409,6 +461,30 @@ if al:
 dup = facts.get("加量不重复")
 if dup:
     checks.append(("加量不重复", dup.get("dup") == 0))
+
+# ── 主页自报词库 ─────────────────────────────────────────────
+# 判据是界面上真的出现了词库名，不是"设置里存对了"。
+bn = facts.get("主页头部灰字自报词库")
+if bn:
+    checks.append(("主页头部显示当前用的是哪本词库（用户不知道在用哪本）",
+                   "词库" in (bn.get("banner") or ""),
+                   "灰字=%r" % bn.get("banner")))
+
+# ── 点「再来 5 个新词」必须**只**加 5 个，且不重复 ───────────────
+# 用户报：「我背完一轮之后，我点击再来五个，结果下面显示30个」
+# 以及：「我点击再来五个之后，出现的单词是重复的」。
+# 两条都锁死：条目数恰好 +5，本轮已排过的词不许再出现。
+ex = facts.get("加量只加 5 个")
+if ex:
+    checks.append(("点「再来 5 个新词」只加 5 个词（不是一大批）",
+                   ex.get("added") == 5,
+                   "新增 %s 个（条目 %s → %s）" % (ex.get("added"), ex.get("itemsBefore"), ex.get("itemsAfter"))))
+    checks.append(("加量后条目数恰好 +5（底部那个数字不会跳）",
+                   (ex.get("itemsAfter") or 0) - (ex.get("itemsBefore") or 0) == 5,
+                   "%s → %s" % (ex.get("itemsBefore"), ex.get("itemsAfter"))))
+    checks.append(("加量后本轮里没有重复的词（用户报「出现的是重复的」）",
+                   ex.get("dupInRound") == 0,
+                   "重复 %s 个" % ex.get("dupInRound")))
 
 # 播放键：用户报「单词右边的播放键是无效的」。
 # 判据是"真的发出了朗读请求"，不是"按钮存在"—— 它一直都存在，只是点了没用。

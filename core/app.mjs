@@ -271,43 +271,78 @@ export function createApp(ports = {}) {
    * 为什么不一次给很多：用户说的是"能不能自己往后背"，要的是**由他决定继续**，
    * 不是系统一口气塞 100 个给他。一次 5 个，想继续再点。
    */
+  /**
+   * 「再来 5 个新词」：本轮再多排 step 个**没排过**的词，接在正在背的这一轮后面。
+   *
+   * ⚠️ 这里原来错得很厉害（用户报「点完显示 30 个」「出现的单词是重复的」）：
+   * 老写法是「用更大的 N（base + step*next）重建一遍容器，再拿结果去重」。
+   * 但走完一轮后 mem 已经变了 —— 那 20 个词从"新词池"迁进了"到期复习池"，
+   * 于是重建出来的大部分**不是**它们本身，去重几乎全部失灵。实测：
+   *   一轮 20 个词 → 点一次「再来 5 个」→ 容器 45 个条目、session 队列 40 个重复。
+   *
+   * 现在改成：把「本轮已排过的词」作为 exclude 交给 buildDailyContainer，
+   * **只建设 step 个**。排除发生在池子源头（见 queue.mjs 的 skip），
+   * 所以学过的词不会从复习池绕回来；再叠一层严格上限，凑不满就凑不满。
+   */
   function extendRound(batch = 5) {
-    const base = state.container?.autoN || state.container?.baseN || state.settings.dailyGoal || 20;
-    const step = Math.max(1, Math.min(20, Math.round(batch)));
-    const next = (state.extendCount || 0) + 1;
-    state.extendCount = next;
-    const targetN = base + step * next;
+    const step = Math.max(1, Math.min(20, Math.round(batch) || 5));
     const key = state.dayKey || Q.dayKey(now());
-    // 已经排过队的词不再重复加入，所以第二次点只会补进"新的"那 5 个
-    const already = new Set((state.roundItems || []).map((it) => it.word.id));
+
+    const prev = Array.isArray(state.roundItems) ? state.roundItems : [];
+    const exclude = new Set(prev.map((it) => it.word.id).filter(Boolean));
+
     const built = Q.buildDailyContainer(personalToWords(), state.mem, {
-      N: targetN,
+      N: step,
       gapDays: state.container?.gapDays ?? gapDays(),
       balance: state.settings.balance,
       now: now(),
       collections: state.settings.collections,
       todayStats: todayStats(),
+      // ⚠️ 这里**必须**沿用设置的闸门状态，不能写死成 true。
+      // 我曾写成 `allowMoreNew: true`（理由是"用户亲手按了按钮"），结果
+      // test/round-control.test.mjs 第 ⑦ 节立刻变红 —— 那条锁的是
+      // 「闸门关着时 extendRound 不该硬塞新词」，而界面在闸门关着时
+      // 根本不显示这个按钮。硬写 true 等于让这个函数**绕过安全阀**，
+      // 那是产品决策，不该由修 bug 顺手改掉。
       allowMoreNew: !!state.settings.allowMoreNew,
       seed: key,
       order: state.settings.order,
+      exclude,
     });
-    const fresh = built.items.filter((it) => !already.has(it.word.id));
-    const merged = [...(state.roundItems || []), ...fresh.map((it) => ({ ...it }))];
+
+    // 严格只要没排过的，并且**不超过 step**。
+    const seen = new Set(exclude);
+    const fresh = [];
+    for (const it of built.items) {
+      const id = it.word && it.word.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      fresh.push({ ...it });
+      if (fresh.length >= step) break;
+    }
+    if (!fresh.length) return state.container;
+
+    const merged = [...prev, ...fresh];
+    state.extendCount = (state.extendCount || 0) + 1;
     state.container = {
       ...state.container,
       ...built,
       items: merged,
-      stats: { ...built.stats, containerSize: targetN, size: merged.length },
+      stats: { ...built.stats, containerSize: merged.length, size: merged.length },
       dayKey: key,
       baseN: state.settings.dailyGoal,
-      autoN: base,
+      autoN: state.container?.autoN || state.container?.baseN || state.settings.dailyGoal,
       extendedBy: state.extendCount,
     };
     state.roundItems = merged.map((it) => ({ ...it }));
-    // 续上正在背的这一轮：保留已有卡（不重考），把新词接在后面
+
+    // 续上正在背的这一轮，把新词接在后面。已经背过的不重考。
     const s = state.session;
     if (!s || S.isFinished(s)) {
-      state.session = S.createSession({ ...state.container, dayKey: key }, sessionOpts());
+      state.session = S.createSession(
+        { items: merged, stats: state.container.stats, dayKey: key },
+        sessionOpts(),
+      );
     } else {
       const have = new Set(s.queue.map((c) => c.word.id));
       const add = fresh.filter((it) => !have.has(it.word.id));
@@ -316,7 +351,7 @@ export function createApp(ports = {}) {
           { items: add, stats: built.stats, dayKey: key }, sessionOpts(),
         ).queue;
         for (const c of extra) s.queue.push(c);
-        // 同上：本轮总量要跟着队列一起长，否则环会说"这一轮已经完了"
+        // 本轮总量要跟着队列一起长，否则环会说"这一轮已经完了"
         s.plannedSize = Math.max(s.plannedSize || 0, s.queue.length);
       }
     }

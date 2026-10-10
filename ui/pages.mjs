@@ -21,6 +21,23 @@ export function injectCore(core) {
   return setCore(core);
 }
 
+/**
+ * 词库 id → 显示名（"cet6" → "六级"）。
+ *
+ * 为什么专门抽一个：用户报「我主页今日这里并没有显示我用的是哪个词库，
+ * 这样我就不知道我到底用的是哪个」。换词库之后尤其需要 —— 界面不说是哪本，
+ * 用户就无从判断刚才那次换库到底成没成。
+ *
+ * 名字取不到就退回 id 本身：宁可能看到一个 "cet6"，也不要空着。
+ */
+export function collectionLabel(state) {
+  const { library: L } = getCore();
+  const id = (state && state.settings && state.settings.collections && state.settings.collections[0]) || '';
+  if (!id) return '';
+  const meta = (L.COLLECTIONS || {})[id];
+  return (meta && meta.name) || id;
+}
+
 /** 记忆保持曲线：一条线证明「按排期走」比「不管它」强（§7.5 证据②）。 */
 function curveSvg(curve) {
   const W = 300;
