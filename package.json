@@ -40,7 +40,7 @@
   ],
   "scripts": {
     "build": "python tools/build.py && python tools/build-plugin.py",
-    "test": "node test/core.test.mjs && node test/plugin.test.mjs && node test/demo-boot.test.mjs && node test/client-activation.test.mjs && node test/bundle-audit.test.mjs && node test/mount.test.mjs"
+    "test": "node test/core.test.mjs && node test/plugin.test.mjs && node test/demo-boot.test.mjs && node test/client-activation.test.mjs && node test/bundle-audit.test.mjs && node test/mount.test.mjs && node test/round-control.test.mjs && node test/multi-conversation.test.mjs"
   },
   "keywords": [
     "deepseek",
