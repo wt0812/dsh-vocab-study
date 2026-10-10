@@ -31,8 +31,29 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 | 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 344 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
 | 装法 | `dsh plugin --profile desktop add github:wt0812/dsh-vocab-study` |
+| 国内镜像 | [gitee.com/wutong2005/dsh-vocab-study](https://gitee.com/wutong2005/dsh-vocab-study)（**与 GitHub 逐提交一致**，见下） |
 | 市场收录 | 已提 PR [awesome-dsh-plugin#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043)，**等上游合并** |
 | 已知缺口 | 见[已知缺口](#已知缺口诚实清单)（8 条，含"未在真实网络环境验证词库拉取"这种） |
+
+### 国内镜像（Gitee）
+
+GitHub 在国内时常连不上，所以有一份 Gitee 镜像：**https://gitee.com/wutong2005/dsh-vocab-study**
+
+它和 GitHub **逐提交一致**（HEAD sha 相同，24 个提交 + `v0.1.0` 标签都在）。
+我在两边的克隆里各跑过 8 个套件，都是 0 失败。
+
+从 Gitee 装的做法是「先克隆，再装本地目录」（`dsh plugin` 没有 `gitee:` 这种形态）：
+
+```powershell
+git clone https://gitee.com/wutong2005/dsh-vocab-study.git
+cd dsh-vocab-study
+python tools/install.py
+```
+
+`install.py` 默认装到 `desktop`（桌面客户端）。要装进浏览器 Web 界面那套 profile，
+把脚本里的 `DEFAULT_PROFILE` 指到 `web` 下的同名目录。
+
+> **镜像不是自动同步的**，是我推的。一切以 GitHub 为准。
 
 > 「成熟度」这一行我写得很克制：**能用**是真的（你亲手点过），
 > 但它是 0.1.0、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
