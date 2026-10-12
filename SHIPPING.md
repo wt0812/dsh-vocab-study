@@ -19,7 +19,7 @@
 | 6. README 含 `dsh plugin --profile web add <包名>` 安装命令 | ✅ |
 | 7. **仓库存在满 1 天**（CI 自动检查） | ✅ 创建于 `2026-10-09T03:15:29Z`，提交 PR 时已 **29.41 小时** |
 | 8. 提 PR：`data/plugins/wt0812__dsh-vocab-study.yml` | ✅ [#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043) 已提，双绿 |
-| 9. 发布到 npm | ✅ `dsh-vocab-study@0.1.0` 已上线 |
+| 9. 发布到 npm | ✅ `dsh-vocab-study@0.2.0` 已上线（`0.1.0` 是 10-10 的旧版，仍在线上） |
 | 10. 等维护者合并 PR | ⏳ **唯一剩下的** |
 
 **上游 CI 到底查什么**（读的是 `scripts/check-submission.mjs`，不是猜的 —— 它只查 4 条）：
@@ -149,7 +149,7 @@ description:
 | 项 | 值 |
 |---|---|
 | 包名 | `dsh-vocab-study`（**归本账号所有，别人抢不走**） |
-| 已发布 | `0.1.0` |
+| 已发布 | `0.2.0`（`latest`）；`0.1.0` 仍在线上，可被精确版本安装 |
 | 页面 | https://www.npmjs.com/package/dsh-vocab-study |
 | 发布账号 | `wt0812` |
 | 国内镜像 | npmmirror ✅ / 腾讯云 ✅ 均已同步（几分钟到几小时延迟） |
@@ -221,11 +221,16 @@ npm view dsh-vocab-study version --registry=https://registry.npmmirror.com/
 
 ### 已知不一致（待处理）
 
-- **`v0.1.0` 这个 tag 指向 `8e51774`，而 `main` 已经到 `3928e42`。**
-  当初选择不动它。**后果**：别人下载 `v0.1.0` 的源码压缩包会拿到**旧版本**。
-  发布下一个版本时应当把 tag 对齐当前提交。
-- npm 上有个 `0.0.0-stage` 占位条目（`stub: true`，内容是 "Temporary package placeholder"）。
-  不影响安装（`latest` 指向 `0.1.0`），介意的话可以 `npm deprecate` 标掉。
+- **`v0.1.0` 这个 tag 指向 `8e51774`，而 `main` 早就走远了。**
+  当初选择不动它（动了会让已下载 `v0.1.0` 的人对不上）。
+  **后果**：别人下载 `v0.1.0` 的源码压缩包会拿到**旧版本**。
+  `0.2.0` 这版的做法是**另开新 tag**，不再动旧的 —— 标签一旦发出去就该是只读的。
+- npm 上有个 `0.0.0-stage` 占位条目（`stub: true`）。不影响安装
+  （`latest` 指向 `0.2.0`），介意的话可以 `npm deprecate` 标掉。
+- npm 的 `0.1.0` 带着三个已修的 bug（词表、重复记录、热力图空白）。
+  **不撤不留**：npm 的原则是已发布版本不删（72 小时后也删不掉），
+  靠 `latest` 指到 `0.2.0` 让新装的人拿到修复版。
+  实测 `dependents` 为空 —— 没有任何包依赖它，所以不会有人被钉在旧版上。
 
 ---
 

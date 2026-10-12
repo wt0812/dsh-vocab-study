@@ -27,7 +27,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 项 | 说明 |
 |---|---|
-| 版本 | `0.1.0`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
+| 版本 | `0.2.0`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
 | 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 344 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
 | 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
@@ -39,7 +39,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 GitHub 在国内时常连不上，所以有一份 Gitee 镜像：**https://gitee.com/wutong2005/dsh-vocab-study**
 
-它和 GitHub **逐提交一致**（HEAD sha 相同，24 个提交 + `v0.1.0` 标签都在）。
+它和 GitHub **逐提交一致**（HEAD sha 相同，33 个提交 + 标签都在）。
 我在两边的克隆里各跑过 8 个套件，都是 0 失败。
 
 从 Gitee 装的做法是「先克隆，再装本地目录」（`dsh plugin` 没有 `gitee:` 这种形态）：
@@ -56,7 +56,7 @@ python tools/install.py
 > **镜像不是自动同步的**，是我推的。一切以 GitHub 为准。
 
 > 「成熟度」这一行我写得很克制：**能用**是真的（你亲手点过），
-> 但它是 0.1.0、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
+> 但它是 0.2.0、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
 
 ---
 
