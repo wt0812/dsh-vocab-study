@@ -126,8 +126,23 @@ def render(mode, drive, w, h, scale=SCALE):
 
 
 # ── 图 1：整屏（胶囊可见）──────────────────────────────
-# 1 倍渲染：这张是"整屏环境"照，2 倍会让它变成 2930x1900，放进 README 太重。
-main_png, _ = render("main", DRIVE_MAIN, 1465, 950, scale=1)
+#
+# ⚠️ 原来这两张图是 **1 倍渲染** 的，理由是「2 倍太重」。那个判断是错的：
+# 1 倍渲染下小字号中文的笔画会糊在一起，音标 `/ˈædvətaɪz/` 也发虚。
+# 实测（用户反馈 + 视觉检查）：1 倍那版最糊的是底部提示语、
+# 副标题「词库·四级·离线模式·用内置词表」、卡片底部那几个小标签。
+#
+# 之所以特别刺眼，是因为**同项目的 `tools/make-promo.mjs` 走的是 2 倍**，
+# 于是"宣传图很清楚、README 图发虚"，两条管线不一致。
+#
+# 现在统一 2 倍。成本对比（都实测过）：
+#   胶囊图  1465x950 / 39 KB  →  1960x1600 / 约 240 KB
+#   面板图   700x1400 / 87 KB →   880x1800 / 约 330 KB
+# 两张加起来约 570 KB。README 是门面，这个代价换清晰度是值的。
+#
+# 显示尺寸靠 **PNG 的 pHYs 元数据**控制：写成 144 DPI，浏览器/GitHub
+# 就会按"逻辑尺寸"显示（1936/2 ≈ 968 CSS px），于是既清晰又不撑破版心。
+main_png, _ = render("main", DRIVE_MAIN, 968, 800, scale=SCALE)
 out1 = os.path.join(ASSETS, "screenshot-1-capsule.png")
 shutil.copyfile(main_png, out1)
 
@@ -144,7 +159,10 @@ shutil.copyfile(main_png, out1)
 # 所以**不裁了**：直接用一整屏。面板完整地浮在对话之上，这本来就是用户
 # 实际看到的画面，当门面图完全够用。（同时把视口给足：.vs-panel.floating
 # 有 max-height: min(64vh, 560px)，视口太矮会把面板内容压得滚动起来。）
-panel_png, b = render("panel", DRIVE_PANEL, 700, 1400, scale=1)
+# 视口宽度要**贴着面板宽**（实测面板 487px 宽）。原来给 700 宽（现在读作 968），
+# 面板只占中间一条，左右全是空背景 —— 图看着像"面板很小"，白占像素。
+# 512 = 487 + 左右各约 12px 边距。
+panel_png, b = render("panel", DRIVE_PANEL, 512, 900, scale=SCALE)
 out2 = os.path.join(ASSETS, "screenshot-2-panel.png")
 shutil.copyfile(panel_png, out2)
 if b and b.get("panel"):
@@ -160,4 +178,11 @@ from PIL import Image
 for name in ("screenshot-1-capsule.png", "screenshot-2-panel.png"):
     q = os.path.join(ASSETS, name)
     im = Image.open(q)
-    print("  %-38s %sx%s  %s 字节" % (name, im.size[0], im.size[1], os.path.getsize(q)))
+    # 192 DPI（= 2 倍的 96 DPI 基准）告诉浏览器/GitHub「这是给高分屏的图」，
+    # 于是它按逻辑尺寸显示：1960 宽的图占 980 CSS px，而不是 1960。
+    # 没有这一步，2 倍图会以物理像素铺开，README 版心会被撑破。
+    im.save(q, dpi=(192, 192))
+    im2 = Image.open(q)
+    print("  %-38s %sx%s  %s dpi  %s 字节"
+          % (name, im2.size[0], im2.size[1], im2.info.get("dpi", ("?",))[0],
+             os.path.getsize(q)))
