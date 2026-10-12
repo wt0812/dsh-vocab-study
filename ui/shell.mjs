@@ -366,6 +366,26 @@ function demoStorage(key) {
  */
 async function seedDemoHistory(storage) {
   if (await storage.get('demoSeeded')) return;
+  /*
+   * 出图/测试时可以用 `?vsSeed=off` 关掉这份演示种子。
+   *
+   * 为什么需要：截图脚本要先注入自己的演示数据（"真的用了半个月"的密度、
+   * 指定连击天数），再让外壳启动。但种子在这里是无条件跑的，
+   * 会把注入的数据原样覆盖回 7 天 —— 症状是热力图只有 7 格有颜色。
+   * 加个开关比让出图脚本去猜执行顺序可靠得多。
+   * 只读一次 URL，生产产物里 ui/shell.mjs 根本不参与构建，不影响插件。
+   */
+  try {
+    if (new URLSearchParams(location.search).get('vsSeed') === 'off') return;
+  } catch {
+    /* 没有 location（测试环境）就照常种 */
+  }
+  /*
+   * 已经有记录时也**不要覆盖**：外部注入的数据未必会设 demoSeeded 标志，
+   * 用「记录条数」判断更可靠。
+   */
+  const existing = typeof storage.list === 'function' ? storage.list('records') : [];
+  if (Array.isArray(existing) && existing.length > 0) return;
   const now = Date.now();
   const DAY = 86400000;
   const words = ['cet4:abandon', 'cet4:adapt', 'cet4:affect', 'cet4:adopt', 'cet4:effect'];
