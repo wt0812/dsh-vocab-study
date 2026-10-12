@@ -15,6 +15,8 @@ import * as L from '../core/library.mjs';
 import * as G from '../core/game.mjs';
 import * as MK from '../core/mistake.mjs';
 import * as HK from '../core/hook.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const DIM = '\x1b[2m';
@@ -336,6 +338,68 @@ if (fail === 0) {
     const none = Object.keys(L.COLLECTIONS).filter((c) => !withSeed.includes(c) && !withUrl.includes(c));
     return none.length === 0;
   })()]);
+
+  // ── CSS 回归保护（2026-10-12）────────────────────────────
+  // 用户报"窗口一小，下面的东西就消失"。查出来是这样一条：
+  //   @media (max-height: 900px) { .vs-deck-heat { display: none } }
+  // 它是**无条件**隐藏，把上面「全 0 才藏」的判断整个盖掉了 ——
+  // 结果攒了半个月的记录，窗口一矮就一格都不显示。
+  //
+  // 这类 bug 的特点是**在源码里看不出错**（两个选择器各自都合理），
+  // 只有把它们放在一起读才发现冲突。所以用文本层面的断言守住：
+  // 热力图**不允许**被媒体查询无条件藏掉。
+  //
+  // ⚠️ 解析前必须**先剥掉注释**。第一版忘了剥，结果把注释里
+  //    那句"这里原来是 @media ... { display: none }"的**引用文字**
+  //    当成了真规则，误报失败。教训：解析源码文本的第一步永远是去注释，
+  //    否则你测的是自己的注释。
+  const cssRaw = (() => {
+    try {
+      return readFileSync(fileURLToPath(new URL('../ui/styles.css', import.meta.url)), 'utf8');
+    } catch { return null; }
+  })();
+  const cssText = typeof cssRaw === 'string' ? cssRaw.replace(/\/\*[\s\S]*?\*\//g, '') : null;
+  extras.push(['能读到 ui/styles.css（读不到就没法守下面两条）', typeof cssText === 'string']);
+  extras.push([
+    '没有任何媒体查询无条件隐藏热力图（曾被 max-height:900px 整块藏掉）',
+    (() => {
+      if (typeof cssText !== 'string') return false;
+      const blocks = [];
+      const re = /@media[^{]*\{/g;
+      let m;
+      while ((m = re.exec(cssText))) {
+        let depth = 1; let i = re.lastIndex;
+        while (i < cssText.length && depth > 0) {
+          if (cssText[i] === '{') depth++;
+          else if (cssText[i] === '}') depth--;
+          i++;
+        }
+        blocks.push(cssText.slice(m.index, i));
+      }
+      for (const b of blocks) {
+        const rules = b.matchAll(/([^{}]+)\{([^{}]*)\}/g);
+        for (const r of rules) {
+          const sel = r[1];
+          const body = r[2];
+          // 带 :has(...) 的是"全 0 才藏"，是设计意图，放行
+          if (sel.includes('.vs-deck-heat') && /display\s*:\s*none/.test(body) && !sel.includes(':has(')) {
+            return false;
+          }
+        }
+      }
+      return true;
+    })(),
+  ]);
+  extras.push([
+    '矮面板降级用的是缩放不是隐藏（媒体查询里改了 cell 尺寸）',
+    (() => {
+      if (typeof cssText !== 'string') return false;
+      const i = cssText.indexOf('max-height: 900px');
+      if (i < 0) return false;
+      const seg = cssText.slice(i, i + 700);
+      return /\.vs-deck-heat[\s\S]*?\.cell[\s\S]*?width\s*:/.test(seg);
+    })(),
+  ]);
 
   console.log('\n健全性附加检查：');
   let extraFail = 0;
