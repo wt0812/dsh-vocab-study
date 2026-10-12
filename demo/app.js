@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-12T03:07:25Z
+ * 构建时间：2026-10-12T03:17:01Z
  */
 'use strict';
 
@@ -6297,6 +6297,40 @@ async function bootInner(mp) {
   ].join('\n');
   mp.appendChild(shell);
 
+  // 对话文案可被调用方覆盖（截图/演示用），走 window.__vsChat。
+  //
+  // 为什么不用 DOM 里的 <script type="application/json"> 槽位：踩过两个坑 ——
+  //   ① 把 <script> 塞进 innerHTML 的字符串数组里，HTML 解析器不执行它，
+  //      而且会把那段 JS 字符串吃进页面文字，直接 SyntaxError；
+  //   ② 用 Page.addScriptToEvaluateOnNewDocument 往里写，那时 document.head
+  //      还不存在，appendChild 抛 null。
+  // window 上的钩子没有这两个问题：脚本在 documentStart 跑，外壳在 boot 时读。
+  try {
+    const custom = window.__vsChat;
+    if (custom && Array.isArray(custom.messages)) {
+      const scroll0 = shell.querySelector('#dsh-scroll');
+      if (scroll0) {
+        scroll0.innerHTML = custom.messages
+          .map((m) =>
+            m.who
+              ? `<div class="dsh-msg user"><div class="who">${m.who}</div><div class="body">${m.body}</div></div>`
+              : `<div class="dsh-msg"><div class="who">Harness</div><div class="body">${m.body}</div></div>`
+          )
+          .join('');
+      }
+    }
+    if (custom && typeof custom.subtitle === 'string') {
+      const dim = shell.querySelector('.dsh-top .dim');
+      if (dim) dim.textContent = custom.subtitle;
+    }
+    if (custom && custom.hideHint) {
+      const h = shell.querySelector('#dsh-hint');
+      if (h) h.style.display = 'none';
+    }
+  } catch {
+    /* 文案是可选的，坏了就当没塞，不影响背词 */
+  }
+
   const composer = shell.querySelector('#dsh-composer');
   const rightGroup = shell.querySelector('#dsh-right-group');
   const ta = shell.querySelector('#dsh-ta');
@@ -6415,11 +6449,13 @@ async function bootInner(mp) {
   // 任务在输出时，胶囊要变成「📖 学词中」并退到一边，不抢焦点、不跳转。
   // 没有这个模拟，那段行为在 demo 里就看不见了。
   // 真装进 DSH 后，这个状态由宿主真实的输出状态驱动，不需要模拟。
-  const STREAM_LINES = [
-    '正在重写 spec：第 1 页改成封面，第 2 页放趋势图，第 3 页…',
-    '把这 8 页的骨架先搭出来，再逐页填内容。',
-    '刚才那版第 5 页的图例位置不对，我重排一下。',
-  ];
+  const STREAM_LINES = (window.__vsChat && Array.isArray(window.__vsChat.streamLines) && window.__vsChat.streamLines.length)
+    ? window.__vsChat.streamLines
+    : [
+        '正在重写 spec：第 1 页改成封面，第 2 页放趋势图，第 3 页…',
+        '把这 8 页的骨架先搭出来，再逐页填内容。',
+        '刚才那版第 5 页的图例位置不对，我重排一下。',
+      ];
   let streamLine = 0;
 
   function runStreamCycle() {
