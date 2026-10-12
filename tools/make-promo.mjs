@@ -335,7 +335,10 @@ try {
   .right { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .shot { border-radius: 16px; overflow: hidden;
           box-shadow: 0 26px 64px rgba(0,0,0,.66), 0 0 0 1px rgba(237,230,219,.10); }
-  .shot img { display: block; width: 100%; }
+  /* 面板图是纵向长条（约 415x580 CSS px）。只给 width:100% 的话它会拿满列宽
+     再按比例撑高，长图能把整页顶出视口 —— 横版就是这么溢出 83px 的。
+     所以**宽高都要压**：宽度自适应，高度封顶。 */
+  .shot img { display: block; width: auto; max-width: 100%; max-height: 74vh; margin: 0 auto; }
   .caption { margin-top: 14px; font-size: 15px; color: #948C80; }
   .stamp { position: absolute; left: 72px; bottom: 30px; font-size: 16px; color: #7E776C; }
   .stamp b { color: #C4BAAA; font-weight: 400; }
@@ -397,21 +400,42 @@ try {
   <div class="stamp"><b>github.com/wt0812/dsh-vocab-study</b> · MIT</div>`, 1280, 640);
 
   // ── 版式 C：1080x1440（小红书竖版，图占主体、字更大）────────
+  //
+  // ⚠️ 这个版式原来是**坏的，而且坏了很久没被发现**：
+  //    它的第一行 CSS 是 `.wrap { display: block; padding: 74px 80px; }`。
+  //    `.wrap` 一旦变成 block，里面那个 `height:100%` + `flex-direction:column`
+  //    的左栏就没了约束，`.facts` 的 `margin-top:auto` 也随之失效 ——
+  //    整页退回**自然流高度**。
+  //
+  //    实测（CDP 读 rect，用和出图完全相同的窗口参数）：
+  //        innerHeight = 1440    scrollHeight = 1984
+  //        .facts   y=1763  bottom=1984   ← 整块在视口外
+  //        .stamp   y=1370  bottom=1400
+  //    也就是说**四张事实卡（386 项 / 2.8 MB / ≈5,400 词 / 3 处）根本没进图**，
+  //    被渲染成了页面溢出区。而 Chrome 静态截图只截视口，所以那 544px 直接丢了。
+  //
+  //    更隐蔽的是：溢出区里还能看见 `.stamp` 的灰字，于是看图的人会以为
+  //    "底部文字挤在一起了"，实际是"有一整块内容没截进来"。两个症状一个根因。
+  //
+  // 改成 flex 列 + `height:100%` 之后再用 `.fit` 控住图高，让面板图和
+  // 四张事实卡同时进画面。改完必须复查 scrollHeight == 1440（见文末闸门）。
   const heroC = page(`
-    .wrap { display: block; padding: 74px 80px; }
-    h1 { font-size: 74px; line-height: 1.12; margin-bottom: 26px; }
-    .sub { font-size: 27px; line-height: 1.66; margin-bottom: 40px; }
-    .cmd { font-size: 19px; padding: 18px 20px; margin-bottom: 40px; }
-    .shot { max-width: 100%; }
-    .caption { font-size: 19px; }
-    .facts { grid-template-columns: 1fr 1fr; gap: 26px 30px; margin-top: 42px; }
-    .fact b { font-size: 42px; }
-    .fact span { font-size: 19px; }
-    .stamp { left: 80px; bottom: 40px; font-size: 19px; }
+    .wrap { padding: 68px 80px 76px; display: flex; flex-direction: column; height: 100%; }
+    .kicker { font-size: 21px; margin-bottom: 12px; letter-spacing: .18em; }
+    h1 { font-size: 60px; line-height: 1.10; margin-bottom: 16px; }
+    .sub { font-size: 21px; line-height: 1.55; margin-bottom: 22px; }
+    /* 面板图按宽高双重约束，保证「图 + 四张卡 + stamp」都在 1440 内 */
+    .shot { align-self: center; border-radius: 14px; }
+    .shot img { width: auto !important; height: auto !important; max-height: 500px; max-width: 100%; }
+    .caption { font-size: 17px; margin-top: 10px; text-align: center; }
+    .facts { grid-template-columns: 1fr 1fr; gap: 18px 30px; margin-top: auto; }
+    .fact b { font-size: 35px; }
+    .fact span { font-size: 17px; }
+    .stamp { left: 80px; bottom: 34px; font-size: 18px; }
     .glow { width: 1100px; height: 1100px; top: -420px; right: -300px; }
   `, `
   <div class="wrap">
-    <div class="kicker" style="font-size:24px">DEEPSEEK HARNESS 插件</div>
+    <div class="kicker">DEEPSEEK HARNESS 插件</div>
     <h1>背单词<br>长在<em>侧栏</em>里</h1>
     <div class="sub">不用另开一个背单词 App。<br>你在 DSH 里干活的时候，它就在旁边。</div>
     <div class="shot"><img src="data:image/png;base64,${b64(shots.today)}"></div>
@@ -422,6 +446,19 @@ try {
   </div>
   <div class="stamp"><b>github.com/wt0812/dsh-vocab-study</b> · MIT</div>`, 1080, 1440);
 
+  // ── 出图 + 闸门：控高 ────────────────────────────────────────
+  //
+  // ⚠️ Chrome 的静态 `--screenshot` **只截视口**。页面比视口高的部分直接丢，
+  //    而且**不报错、不出警告、退出码 0** —— 你会拿到一张"看起来正常"的图，
+  //    只是底部少了一整块。竖版那个 bug 就是这么藏了很久：
+  //    scrollHeight 1984 / 视口 1440，四张事实卡整块不见了。
+  //
+  //    所以每张图**先量后截**：用 CDP 读真实 scrollHeight，超容差就硬失败。
+  //    "图出成功了" ≠ "内容都在图里"。
+  const SCALE = process.env.PROMO_SCALE || '2';
+  const TOLERANCE = 2;   // .sub 换行有 1px 级抖动，不是真溢出
+  const overflow = [];
+
   for (const [name, html, w, h] of [
     ['promo-hero-1600x1200', heroA, 1600, 1200],
     ['promo-social-1280x640', heroB, 1280, 640],
@@ -430,12 +467,51 @@ try {
     const htmlPath = resolve(outDir, `_${name}.html`);
     writeFileSync(htmlPath, html, 'utf8');
     const png = resolve(outDir, `${name}.png`);
+    const url = pathToFileURL(htmlPath).href;
+
+    // ① 量：内容是不是装得下
+    let m = null;
+    try {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: w, height: h, deviceScaleFactor: Number(SCALE), mobile: false,
+      });
+      await cdp.send('Page.navigate', { url });
+      await sleep(700);
+      m = await ev(cdp, `({
+        ih: innerHeight, iw: innerWidth,
+        sh: document.documentElement.scrollHeight,
+        factsBottom: Math.round((document.querySelector('.facts')||{getBoundingClientRect:()=>({bottom:-1})}).getBoundingClientRect().bottom),
+        stampTop: Math.round((document.querySelector('.stamp')||{getBoundingClientRect:()=>({top:-1})}).getBoundingClientRect().top),
+      })`);
+    } catch (e) {
+      console.log(`  ${name}  闸门测量失败: ${e.message}`);
+    }
+
+    // ② 截
     const r = spawnSync(CHROME, [
       '--headless=new', '--disable-gpu', '--hide-scrollbars',
-      '--force-device-scale-factor=1', `--window-size=${w},${h}`,
-      `--screenshot=${png}`, pathToFileURL(htmlPath).href,
+      `--force-device-scale-factor=${SCALE}`, `--window-size=${w},${h}`,
+      `--screenshot=${png}`, url,
     ], { encoding: 'utf8' });
-    console.log(`  ${name}.png  ${existsSync(png) ? '✅ ' + readFileSync(png).length + ' B' : '❌ ' + (r.stderr ?? '').slice(0, 120)}`);
+
+    const size = existsSync(png) ? Math.round(readFileSync(png).length / 1024) + ' KB' : '❌ ' + (r.stderr ?? '').slice(0, 100);
+    if (m && m.sh > m.ih + TOLERANCE) {
+      const gap = m.stampTop - m.factsBottom;
+      console.log(`  ${name}.png  ${size}   ❌ 内容溢出 ${m.sh - m.ih}px（scrollHeight ${m.sh} > 视口 ${m.ih}）`);
+      console.log(`       .facts 底部 ${m.factsBottom} / .stamp 顶部 ${m.stampTop}` +
+                  (gap < 0 ? ` → 两者重叠 ${-gap}px` : ''));
+      console.log('       底部这一块**没进图**。调小字号/间距或给图加 max-height，别放着不管。');
+      overflow.push(`${name} 溢出 ${m.sh - m.ih}px`);
+    } else if (m && m.factsBottom >= 0 && m.stampTop >= 0 && m.stampTop < m.factsBottom) {
+      console.log(`  ${name}.png  ${size}   ❌ .stamp 压住 .facts ${m.factsBottom - m.stampTop}px`);
+      overflow.push(`${name} stamp 压 facts`);
+    } else {
+      console.log(`  ${name}.png  ${size}   ✅ 装得下${m ? `（scrollHeight ${m.sh} / 视口 ${m.ih}）` : ''}`);
+    }
+  }
+
+  if (overflow.length) {
+    throw new Error('宣传图内容溢出，拒绝产出半张图：' + overflow.join('；'));
   }
 } finally {
   cdp?.close();
