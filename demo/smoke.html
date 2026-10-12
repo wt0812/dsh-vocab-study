@@ -991,7 +991,7 @@ body { margin: 0; background: #14120F; }
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-10T07:36:48Z
+ * 构建时间：2026-10-12T03:07:25Z
  */
 'use strict';
 
@@ -4287,6 +4287,14 @@ function createApp(ports = {}) {
     state.combo = saved.combo || G.newCombo(now());
     state.exp = saved.exp || 0;
     state.pause = saved.pause || null;
+    // 打卡历史：热力图（heatmap() 遍历 state.records）与「今日已背几词」都看这里。
+    // 它一直靠 storage.append('records', row) 追加写盘，但这边**从来没读回来过** ——
+    // 于是每一次重启/重开面板，热力图与今日统计都归零，像刚装好一样。
+    // （真插件走 JSONL，demo 走 localStorage，两条路的 list() 语义一致。）
+    state.records = typeof storage.list === 'function' ? storage.list('records') : [];
+    // history 是 persist() 一直在写、这边却漏读的另一个字段：
+    // 「连续 3 天完成 → 自动回到 N」（effectiveBaseN）要靠 history.days。
+    state.history = saved.history || { days: [] };
 
     // 0 屏提问（§11）：默认四级，直接开背；首屏不问任何东西
     const coll = state.settings.collections?.[0] || 'cet4';
@@ -7494,7 +7502,15 @@ function demoStorage(key) {
   };
 }
 
-/** 首次打开时补一段「过去 7 天」的记录，好让连续天数与热力图有东西可看。 */
+/**
+ * 首次打开时补一段「过去 7 天」的记录，好让连续天数与热力图有东西可看。
+ *
+ * ⚠️ 这些数据必须写进 **`state` 这个 key 里的字段**，不能另开顶层 key。
+ * 插件只读 `state` 与 `session`（见 createApp 的 init / persist），
+ * 所以曾经写成 `set('records'|'streak'|'exp')` 的那一版等于写进了空气：
+ * 97 条记录、7 天连击一个都没显示出来，界面看起来就像刚装好。
+ * 字段名与形状照抄 persist() 里写的那份，别自己起名字。
+ */
 async function seedDemoHistory(storage) {
   if (await storage.get('demoSeeded')) return;
   const now = Date.now();
@@ -7526,9 +7542,26 @@ async function seedDemoHistory(storage) {
       });
     }
   }
+
+  // 热力图读的是 state.records（heatmap() 按 dayKey 数每天几条）；连击/经验读 state.streak / state.exp。
+  // 前 7 天逐日打卡，今天还没开始。
+  const days = [];
+  for (let back = 7; back >= 1; back--) {
+    days.push({ key: dk(now - back * DAY), done: true });
+  }
+
+  const saved = (await storage.get('state')) || {};
+  await storage.set('state', {
+    ...saved,
+    streak: { current: 7, longest: 7, lastDay: dk(now - DAY), totalDays: 7 },
+    exp: 268,
+    // history 只喂「连续 3 天完成 → 自动回到 N」（effectiveBaseN），
+    // 热力图不看它。写成 {days:[{key,done}]}，别跟 records 的 {dayKey} 混。
+    history: { days },
+  });
+  // ⚠️ 这份记录必须写成**顶层 records**：heatmap() 靠 storage.append('records')
+  // 积累、init() 靠 storage.list('records') 读回。写成 state.records 反而读不到。
   await storage.set('records', records);
-  await storage.set('streak', { current: 7, longest: 7, lastDay: dk(now - DAY), totalDays: 7 });
-  await storage.set('exp', 268);
   await storage.set('demoSeeded', true);
 }
 
