@@ -45,6 +45,12 @@ CORE_EXPORTS = [
             "pairsNeedingDrill", "activePairs", "blacklistedPartners", "similarity",
             "ERROR_KIND", "classifyError", "diagnosis", "pickDistractors"]),
     ("SEED", ["SEED_CET4_RAW", "SEED_COLLECTIONS"]),
+    # 各考纲词库的内置词表（生成产物，见 tools/make-seeds.mjs）。
+    # ⚠️ 这个注册表有**两份**：这里和 tools/build.py 的 CORE_EXPORTS。
+    # 一次只改一份的话，另一条构建路径会报
+    # `SEED_CET6 is not defined` —— 包看着构建成功，一加载就崩。
+    ("SEEDX", ["SEED_CET6", "SEED_KAOYAN", "SEED_TOEFL", "SEED_GRE", "SEED_IELTS",
+               "SEED_EXAM_COUNTS"]),
     ("L", ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
            "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
            "contextSentence", "SEED_CET4"]),
@@ -69,8 +75,8 @@ CORE_EXPORTS = [
 
 # core-ref 注册表的键名（全名，界面层读的是这个）
 CORE_NS_KEY = {
-    "M": "memory", "MK": "mistake", "SEED": "seed", "L": "library", "SP": "speech",
-    "HK": "hook",
+    "M": "memory", "MK": "mistake", "SEED": "seed", "SEEDX": "seedExams",
+    "L": "library", "SP": "speech", "HK": "hook",
     "Q": "queue", "G": "game", "B": "beckon", "S": "session", "A": "app",
 }
 
@@ -79,6 +85,9 @@ CORE_ORDER = [
     "core/memory.mjs",
     "core/mistake.mjs",
     "core/seed-cet4.mjs",
+    # 各考纲词库的内置词表（生成产物）。**必须在 library.mjs 前** ——
+    # 摊平顺序就是依赖顺序，library.mjs 要用它的常量。
+    "core/seed-exams.mjs",
     "core/library.mjs",
     "core/speech.mjs",
     "core/hook.mjs",
@@ -106,7 +115,7 @@ CORE_GET_SHORT_KEY_RE = re.compile(
 NS_KEY_FOR_SHORT = {
     "M": "memory", "MK": "mistake", "G": "game", "Q": "queue",
     "L": "library", "B": "beckon", "SP": "speech", "S": "session", "A": "app",
-    "SEED": "seed", "HK": "hook",
+    "SEED": "seed", "SEEDX": "seedExams", "HK": "hook",
 }
 
 

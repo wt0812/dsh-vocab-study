@@ -24,19 +24,47 @@ mkdirSync(outDir, { recursive: true });
 const TEST_FILES = readdirSync(resolve('test')).filter((f) => f.endsWith('.test.mjs'));
 const LIB = readFileSync(resolve('lib/client.js'));
 const LIB_KB = (LIB.length / 1024).toFixed(1);
+// 版面上的体积读数：超过 1 MB 就换算成 MB，否则读起来是「2910.7 KB」这种怪数字。
+const LIB_SIZE = LIB.length >= 1048576
+  ? `${(LIB.length / 1048576).toFixed(1)} MB`
+  : `${LIB_KB} KB`;
 const PKG = JSON.parse(readFileSync(resolve('package.json'), 'utf8'));
 
-// 内置词表真实词量（现算，不手写）。离线时能背的就是这么多 —— 见下面 FACTS 的注释。
-const SEED_MOD = await import(pathToFileURL(resolve('core/seed-cet4.mjs')).href);
-const SEED_COUNT = SEED_MOD.SEED_CET4_RAW.length;
-const SEED_COLLECTIONS_WITH_WORDS = [
-  ...new Set(SEED_MOD.SEED_CET4_RAW.map((w) => w.collection)),
-];
-console.log(`内置词表：${SEED_COUNT} 词，覆盖 ${SEED_COLLECTIONS_WITH_WORDS.join('/')}`);
-if (SEED_COLLECTIONS_WITH_WORDS.length < 6) {
-  const empty = Object.keys(SEED_MOD.SEED_COLLECTIONS).filter((c) => !SEED_COLLECTIONS_WITH_WORDS.includes(c));
-  console.log(`  ⚠ 这些词库一个内置词都没有: ${empty.join(', ')}`);
-  console.log('  ⚠ 所以宣传图上不能写「100% 离线」—— 离线只能背上面这些词');
+// 内置词表真实词量（现算，不手写）。离线时能背的就是这么多。
+//
+// ⚠️ 这段原来是这么写的：
+//     const SEED_MOD = await import('core/seed-cet4.mjs');
+//     if (SEED_COLLECTIONS_WITH_WORDS.length < 6) { 警告「不能写 100% 离线」 }
+//   那是对的 —— 当时确实只有四级有内置词（120 个），切到雅思会拿到空词表。
+//   后来补了 seed-exams.mjs（六级/考研/雅思/托福/GRE 各有自己的内置词表），
+//   所以这个警告的**前提变了**，得跟着改，不然它会一直喊狼来了。
+//   现在改成直接从 library.seedFor() 问每个词库到底有多少内置词 ——
+//   单一事实来源，不用两边维护。
+const LIB_MOD = await import(pathToFileURL(resolve('core/library.mjs')).href);
+const seedCounts = {};
+for (const c of Object.keys(LIB_MOD.COLLECTIONS)) {
+  seedCounts[c] = LIB_MOD.seedFor(c).length;
+}
+const SEED_TOTAL = Object.values(seedCounts).reduce((a, b) => a + b, 0);
+const EMPTY_SEEDS = Object.entries(seedCounts).filter(([, n]) => n === 0).map(([c]) => c);
+// 单个词库的内置词量。
+//
+// ⚠️ 这里试过三种写法，前两种都不好：
+//   · SEED_TOTAL（29,841）= 六个词库**总和**，但用户离线时背的是**某一个**词库，
+//     拿总和当卖点是虚报。
+//   · 区间「116–7,504 词」= 数学上没错，但四级那个是 116 词的手写小样本、
+//     其余是几千词的生成表，区间跨得太离谱，看起来像 bug 而不像数据。
+// 最后报**中位数（约 X 词）**：这是"随便切一个词库大概能背多少"，
+// 能对得上任何一种情况，也不会被误解。
+const seedNums = Object.values(seedCounts).filter((n) => n > 0).sort((a, b) => a - b);
+const mid = seedNums.length ? seedNums[Math.floor(seedNums.length / 2)] : 0;
+const SEED_TYPICAL = `≈${(Math.round(mid / 100) * 100).toLocaleString()} 词`;
+console.log(
+  `内置词表：共 ${SEED_TOTAL} 词 —— ` +
+  Object.entries(seedCounts).map(([c, n]) => `${c}:${n}`).join('  ')
+);
+if (EMPTY_SEEDS.length) {
+  console.log(`  ⚠ 这些词库没有内置词（离线时会拿到空词表）: ${EMPTY_SEEDS.join(', ')}`);
 }
 
 /** 跑一遍测试并数出断言条数。
@@ -54,10 +82,17 @@ function countAssertions() {
   for (const f of TEST_FILES) {
     const r = spawnSync(process.execPath, [resolve('test', f)], { encoding: 'utf8' });
     const out = (r.stdout ?? '') + (r.stderr ?? '');
-    let n = 0;
+    // ⚠️ 不能只抓汇总行。core.test.mjs 在打印 `85 通过 / 0 失败` **之后**，
+    // 还会跑一段「健全性附加检查」，那些 ✓ 不在汇总里。
+    // 只抓汇总的话，附加检查里加多少条数字都不动 —— 实测就吃过这个亏：
+    // 我新加了 8 条断言，总数还是 372，一度以为没生效。
+    // 改成：汇总数字 + 附加检查的 ✓ 条数。
     const m = out.match(/(\d+)\s*(?:通过|passed)/);
-    if (m) n = Number(m[1]);
-    else n = (out.match(/[✓✔]/g) ?? []).length;
+    let n = m ? Number(m[1]) : (out.match(/[✓✔]/g) ?? []).length;
+    const extraSeg = out.includes('健全性附加检查')
+      ? out.slice(out.lastIndexOf('健全性附加检查'))
+      : '';
+    n += (extraSeg.match(/[✓✔]/g) ?? []).length;
     per[f.replace('.test.mjs', '')] = n;
     total += n;
   }
@@ -256,15 +291,21 @@ try {
   // 版面上的每个数字都在这里现算：测试数跑一遍数出来、体积读文件、词量从内置词表数。
   //
   // ⚠️ 曾经写过「100% 离线可用」，**那是假的，已撤掉**：
-  //   内置词表实际只有 120 个词，而且全是四级；六级/考研/雅思/托福/GRE
-  //   一个内置词都没有，六个 collection 的 urls 也全是空数组。
-  //   离线时只能背这 120 个词。把这说成「100% 离线」是夸大。
-  //   真话是「不联网也能开背」——能，但只有 120 个词。
+  //   当时内置词表只有 120 个词、全是四级；六级/考研/雅思/托福/GRE
+  //   一个内置词都没有，六个 collection 的 urls 也全是空数组，
+  //   离线时切过去拿到的是空词表。把这说成「100% 离线」是夸大。
+  //
+  //   现在**这句话基本成立了**（六个词库各有自己的内置词表，共 29,725 词），
+  //   但仍然不写「100%」—— 严谨的说法是「断网也能开背」，
+  //   因为内置的是考纲词表快照，远程源取到的是更全的版本。
   const b64 = (f) => readFileSync(f).toString('base64');
   const FACTS = [
     [`${ASSERT.total} 项`, `测试断言，${TEST_FILES.length} 个套件全绿`],
-    [`${LIB_KB} KB`, '单文件，零运行时依赖'],
-    [`${SEED_COUNT} 词`, '内置词表，断网也能开背'],
+    [LIB_SIZE, '单文件，零运行时依赖'],
+    // ⚠️ 这里**不能写 SEED_TOTAL（29,841）**，那是六个词库内置词的总和，
+    //    而用户离线时背的是**某一个**词库。拿总和当卖点是虚报。
+    //    所以报中位数，见上面 SEED_TYPICAL 的注释。
+    [SEED_TYPICAL, '内置词表，断网也能开背'],
     ['3 处', 'npm / GitHub / Gitee 都能装'],
   ];
   const INSTALL = 'dsh plugin --profile web add dsh-vocab-study';

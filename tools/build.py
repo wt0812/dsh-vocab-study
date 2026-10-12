@@ -90,6 +90,9 @@ CORE_ORDER = [
     ("M", "core/memory.mjs"),
     ("MK", "core/mistake.mjs"),
     ("SEED", "core/seed-cet4.mjs"),
+    # 各考纲词库的内置词表（生成的，见 tools/make-seeds.mjs）。
+    # **必须排在 library.mjs 前面** —— 顺序就是依赖顺序，L 要用它的常量。
+    ("SEEDX", "core/seed-exams.mjs"),
     ("L", "core/library.mjs"),
     ("SP", "core/speech.mjs"),
     ("HK", "core/hook.mjs"),
@@ -109,6 +112,11 @@ CORE_EXPORTS = {
            "pairsNeedingDrill", "activePairs", "blacklistedPartners", "similarity",
            "ERROR_KIND", "classifyError", "diagnosis", "pickDistractors"],
     "SEED": ["SEED_CET4_RAW", "SEED_COLLECTIONS"],
+    # 各考纲词库的内置词表（生成产物）。library.mjs 从它取值，
+    # 摊平后是同一个作用域里的顶层绑定，所以这里必须登记，
+    # 否则 L 里的 `SEED_CET6` 会变成未定义 → 整包加载就报 ReferenceError。
+    "SEEDX": ["SEED_CET6", "SEED_KAOYAN", "SEED_TOEFL", "SEED_GRE", "SEED_IELTS",
+              "SEED_EXAM_COUNTS"],
     "L": ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
           "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
           "contextSentence", "SEED_CET4"],

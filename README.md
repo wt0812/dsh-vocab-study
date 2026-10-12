@@ -327,9 +327,23 @@ core/      纯逻辑。零宿主依赖，可跨环境运行（Node 里直接跑�
   beckon.mjs    「该不该招呼你」的状态机（第一词/好久不见/到期/学词中/交接…）
   session.mjs   一次学习会话：轮次、同轮重训、撤销、拼写测验
   library.mjs   词库：内置种子 / 剪贴板解析 / 降级到内置词表
+  seed-cet4.mjs 四级内置词表（116 词，手写，带例句和搭配）
+  seed-exams.mjs 六级/考研/雅思/托福/GRE 内置词表（生成的，见下）
   speech.mjs    系统语音朗读（不支持就静默跳过，不影响背词）
   app.mjs       把它们缝起来，对外只暴露一个 createApp(ports)
   spec-cases.mjs 共享验收用例（demo 与 Node 单测跑的是同一套断言）
+
+> **关于内置词表**：`seed-exams.mjs` 是**生成产物**（2.5 MB，29,725 词），
+> 由 `tools/make-seeds.mjs` 从 [ECDICT](https://github.com/skywind3000/ECDICT)
+> （MIT）按考纲 `tag` 筛出来。不要手改，改词表就重跑那个脚本。
+>
+> 为什么要有它：这五个词库的远程词表取不到时要能降级，而且降级内容
+> **必须各不相同**。以前 `seedFor()` 是把四级那 116 个词换个 id 前缀
+> 冒充六级/雅思 —— 那是假数据，比"词表为空"更坏（空的用户知道不对，
+> 假的用户不知道，而且 id 前缀一变，学习记录全部对不上）。
+>
+> 代价是客户端产物从 314 KB 涨到约 2.9 MB。这是**用体积换离线可用**的
+> 明确取舍，不是意外。
 
 store/
   client-store.mjs  浏览器持久化：多窗口只读锁 + 配额降级（不阻塞）
@@ -541,8 +555,31 @@ $env:VS_DUMP=1; node test/demo-boot.test.mjs   # 打印外壳 DOM 树与关键�
    以后接上 AI 的正确形态是**叠加**而不是替换：有 AI 时用 AI，AI 挂了回落到本地
    结果（§9「AI 挂了不阻塞」）。那时「暂时没编出来」才是一句诚实的失败文案。
 
-5. **词库网络拉取未在真实环境验证。**
-   `library.mjs` 的拉取路径只有降级测试覆盖（拉不到 → 用内置词表）。演示与测试都走内置种子词表。
+5. **词库网络拉取**（这一条原来写的是"未在真实环境验证"，现已实测，附结果）。
+   实测命令：`NODE_USE_ENV_PROXY=1 HTTPS_PROXY=... node tools/make-seeds.mjs` 之外，
+   用 `loadCollection(id, {fetcher: 真fetch})` 逐个跑过一遍，结果：
+
+   | 词库 | 远程词数 | 内置词数 | 状态 |
+   |---|---|---|---|
+   | cet4 | 4565 | 116 | ✅ |
+   | cet6 | 2207 | 5406 | ✅ |
+   | kaoyan | 5304 | 4801 | ✅ |
+   | ielts | **无远程源** | 5040 | 只有内置 |
+   | toefl | 4534 | 6974 | ✅ |
+   | gre | 7779 | 7734 | ✅ |
+
+   ⚠️ 两个当时才发现的 bug，都记在 `docs/INCIDENTS.md`：
+   - `loadCollection` 用 `meta.urls || SOURCES[c]` 取源，而 `meta.urls` 是空数组
+     （**真值**），于是 `SOURCES` 里那些 URL 一行都没生效。六个词库全部落到内置，
+     而且内置又是四级词换个前缀 —— 切到六级拿到的是四级词。
+     改成按 `.length` 判断。
+   - `parseWordlist` 只按「制表符 / 2+ 空格」切行，而 CET6 / 考研 / GRE 的源是
+     **单空格**格式（`abandon [əˈbændən] v. 放弃`）→ 整行被当成一个"单词"丢掉。
+     实测 CET6 只解出 7 个词、考研 0 个、GRE 1 个。改成**优先按 `[...]` 音标括号切**。
+
+   ⚠️ 本地测试需要 `NODE_USE_ENV_PROXY=1`：Node 24 的 `fetch` 不自动读
+   `HTTPS_PROXY`，直连 jsdelivr 会 ECONNRESET。这只影响本机测试，不影响插件运行
+   （浏览器里 fetch 走系统代理设置）。
 
 6. **`node_modules` 那份安装是联接，跑 `pnpm install` 可能把它换成副本。**
    换了以后插件**照旧能用**（副本内容是完整的），只是以后重建产物不会自动生效。

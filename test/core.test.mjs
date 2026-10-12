@@ -275,6 +275,68 @@ if (fail === 0) {
       && typeof c.stats.newCount === 'number';
   })()]);
 
+  // ── 词表解析（这里原来**一条测试都没有**，所以坏了很久没人知道）──
+  //
+  // 背景：parseWordlist 原来只按「制表符 / 2+ 空格」切行。
+  // 而 CET6 / 考研 / GRE 的源都是**单空格**格式（`abandon [əˈbændən] v. 放弃`），
+  // 切不开 → 整行被当成一个"单词" → 被词形正则判掉。
+  // 实测：CET6 一万多字符只出 7 个词、考研出 0 个、GRE 出 1 个，
+  // **而且界面不报错**，只是切过去词表是空的。
+  //
+  // 下面这几条就是钉住修好之后的行为：同一个词，三种分隔风格都要能解析。
+  const P_SINGLE = L.parseWordlist('abandon [əˈbændən] v. 抛弃，放弃', 'x', 0);
+  const P_MULTI = L.parseWordlist("abandon           [ə'bændən]            vt.  放弃,沉溺n.  放任", 'x', 0);
+  const P_TAB = L.parseWordlist('abandon\t[əˈbændən]\tv. 放弃', 'x', 0);
+  extras.push(['解析单空格格式（CET6/考研/GRE 的真实格式）', (() => {
+    return P_SINGLE.length === 1
+      && P_SINGLE[0].word === 'abandon'
+      && P_SINGLE[0].ipa === 'əˈbændən'
+      && P_SINGLE[0].meaning.includes('放弃');
+  })()]);
+  extras.push(['解析多空格格式（TOEFL 的真实格式）', (() => {
+    return P_MULTI.length === 1 && P_MULTI[0].word === 'abandon' && P_MULTI[0].meaning.includes('放弃');
+  })()]);
+  extras.push(['解析制表符格式', (() => {
+    return P_TAB.length === 1 && P_TAB[0].word === 'abandon' && P_TAB[0].meaning.includes('放弃');
+  })()]);
+  extras.push(['带连字符的词不被截断', (() => {
+    const r = L.parseWordlist("about-turn [ə'bauttə:n] n. 转向", 'x', 0);
+    return r.length === 1 && r[0].word === 'about-turn';
+  })()]);
+  extras.push(['噪声行被丢弃（不产生垃圾词条）', (() => {
+    return L.parseWordlist('123 @@ ###', 'x', 0).length === 0
+      && L.parseWordlist('!!!', 'x', 0).length === 0;
+  })()]);
+  extras.push(['JSON 数组格式仍然可用（回归保护）', (() => {
+    const r = L.parseWordlist(JSON.stringify([{ word: 'abandon', ipa: 'x', meaning: 'y' }]), 'x', 0);
+    return r.length === 1 && r[0].word === 'abandon';
+  })()]);
+
+  // ── 每个词库都必须真的有词可背 ──
+  //
+  // 这条是给「切到六级/雅思拿到的是四级词」那个 bug 上的锁。
+  // 当时 seedFor() 对非四级词库是「把四级词换个 id 前缀」，六个词库一模一样。
+  extras.push(['每个词库的词条 id 前缀是自己的（不是四级别名）', (() => {
+    const ids = {};
+    for (const c of Object.keys(L.COLLECTIONS)) {
+      const ws = L.seedFor(c);
+      ids[c] = new Set(ws.map((w) => w.id.split(':')[0]));
+    }
+    // 每个词库的种子都只应属于它自己
+    return Object.entries(ids).every(([c, set]) => set.size === 1 && set.has(c));
+  })()]);
+  extras.push(['每个词库都声明了词表源或内置词', (() => {
+    // 有内置种子、或者在 SOURCES/COLLECTIONS 里给了 url，二者至少有一个
+    const withSeed = Object.keys(L.COLLECTIONS).filter((c) => L.seedFor(c).length > 0);
+    const withUrl = Object.keys(L.COLLECTIONS).filter((c) => {
+      const meta = L.COLLECTIONS[c] || {};
+      return (meta.urls && meta.urls.length) || (L.SOURCES[c] && L.SOURCES[c].length);
+    });
+    // 目前六级/考研/托福/GRE 走远程源，四级走内置；至少不能有「两样都缺」的
+    const none = Object.keys(L.COLLECTIONS).filter((c) => !withSeed.includes(c) && !withUrl.includes(c));
+    return none.length === 0;
+  })()]);
+
   console.log('\n健全性附加检查：');
   let extraFail = 0;
   for (const [name, ok] of extras) {
