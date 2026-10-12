@@ -32,3 +32,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 盯守脚本的状态日志（写到 ~/.dsh 下，但防止误落仓库）
+/.pr-watch.log
+
