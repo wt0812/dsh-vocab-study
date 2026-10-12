@@ -113,6 +113,11 @@ try {
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `window.__vsChat = ${JSON.stringify(CHAT)};` });
   await cdp.send('Page.navigate', { url: pathToFileURL(resolve('demo/preview.html')).href });
   await sleep(3400);
+  // 跟 make-promo.mjs 一样先清干净：不然沿用上次的进度，
+  // 动图和宣传图上的数字会对不上，同一批素材里数字打架看着就假。
+  await ev(cdp, `(() => { try { localStorage.clear(); return 'ok'; } catch (e) { return 'failed'; } })()`);
+  await ev(cdp, `location.reload()`);
+  await sleep(3400);
   await ev(cdp, `(window.__vsDemo.openPanel(), 'ok')`);
   await sleep(1000);
 

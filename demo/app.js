@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-12T03:17:01Z
+ * 构建时间：2026-10-12T04:07:06Z
  */
 'use strict';
 
@@ -6543,7 +6543,22 @@ function demoStorage(key) {
       flush();
     },
     list(k) {
-      return mem[k] || [];
+      // 必须返回**副本**，不能把内部数组直接交出去。
+      //
+      // 踩过的坑（这个 bug 是我自己引进的）：init() 里加了
+      //   state.records = storage.list('records')
+      // 之后，如果 list 直接返回 mem[k] 这个引用，那么
+      //   state.records === mem['records']  →  同一个数组
+      // 而 writeRecord() 会
+      //   state.records.push(row)        ← 第 1 次
+      //   storage.append('records', row) ← mem['records'].push(row)，第 2 次
+      // 于是**每答一题记录两条**，连 ts 都一样。
+      // 症状：进度环走到 20/20，而「今天已背」显示 40。
+      //
+      // 真插件没这个问题：createMemoryStorage 是 .slice()、localStorage 版是
+      // JSON.parse（都是新数组）。所以是**这个 demo 端口没遵守「list 返回副本」
+      // 的约定**，而不是 core 的错。
+      return (mem[k] || []).slice();
     },
   };
 }

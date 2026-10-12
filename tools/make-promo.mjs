@@ -70,40 +70,53 @@ function countAssertions() {
 
 const ASSERT = countAssertions();
 
-// ── 用插件自己的机制把「今天」推进几步 ─────────────────────────
-// 走它自己暴露的作答入口：rate(3)=界面上「会了」、rate(1)=「忘了」，
-// 再 next() 翻到下一张卡。**不碰内部 state 结构**（那是实现细节，
-// 而且 app.state 是给界面看的精简快照，根本没有 session）。
-// （先写成 answerCard/reveal 都是猜的，两个都不存在：正确答案是 rate + next。）
+// ── 用界面自己的流程把「今天」走满一轮 ────────────────────────
+//
+// 这里绕了几圈才写对，记下来：
+//   · app.rate(rating)  只登记一次作答，**不推进**（试过：连调 20 次，covered 还是 1）
+//   · app.rate + app.next 一起调 → 两处各自记一笔，「今天已背」翻倍到 40
+//   · 界面真实的流程是（见 ui/panel.mjs:42-61 和 96-107）：
+//       点卡片翻面(lastReveal) → 点评分按钮 → 点「下一张」
+//     而且**必须先翻面**，否则评分什么也不做。
+//
+// 所以不再猜内部 API，改成**派发真实点击事件**走界面自己的流程。
 const DRIVE_PROGRESS = `
 (async () => {
   const d = window.__vsDemo;
   if (!d || !d.app || !d.openPanel) return 'no app';
   d.openPanel();
-  const app = d.app;
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
-  await wait(400);
+  await wait(500);
+  const click = (el) => el && el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  const byText = (sel, t) => [...document.querySelectorAll(sel)].find(n => (n.textContent || '').includes(t));
+
   const trace = [];
-  // 今天过 8 个词：6 个会了、2 个忘了 —— 一个真实的「背到一半」中间态
-  const plan = [3, 1, 3, 3, 1, 3, 3, 3];
-  for (const rating of plan) {
-    try {
-      app.rate(rating);
-      app.next();
-      trace.push(rating);
-    } catch (e) {
-      trace.push('抛错: ' + e.message);
-      break;
-    }
-    await wait(110);
+  // 20 项 = 一整轮（跟界面上「今日 N/20」的分母一致）
+  const plan = ['忘了', '会了', '会了', '模糊', '会了', '会了', '忘了', '会了', '会了', '模糊',
+                '会了', '会了', '忘了', '会了', '会了', '模糊', '会了', '会了', '会了', '会了'];
+  for (const label of plan) {
+    // 1) 翻面：点卡片
+    const cardEl = document.querySelector('.vs-card, .vs-deck-card, [class*=card]');
+    click(cardEl);
+    await wait(150);
+    // 2) 评分：点对应的按钮
+    const btn = byText('.vs-rate', label);
+    if (!btn) { trace.push('没找到按钮:' + label); break; }
+    click(btn);
+    await wait(150);
+    // 3) 下一张
+    const nx = document.querySelector('[data-act="next"]');
+    click(nx);
+    await wait(170);
+    trace.push(label);
   }
-  const s = app.state;
+  const s = d.app.state || {};
   return {
     trace,
+    steps: trace.length,
     covered: s.covered,
-    combo: s.combo ? s.combo.combo : null,
-    exp: s.level ? s.level.exp : null,
-    levelName: s.level ? s.level.name : null,
+    todayAnswered: s.stats ? s.stats.todayAnswered : null,
+    roundSize: s.session ? s.session.plannedSize : null,
   };
 })()`;
 
@@ -183,8 +196,21 @@ try {
   await cdp.send('Page.navigate', { url: pathToFileURL(resolve('demo/preview.html')).href });
   await sleep(3400);
 
+  // 每次重跑都从干净状态开始：不然 localStorage 里留着上一次的进度，
+  // 宣传图上会出现「今日 40 词」「这一轮走完了」这种滚过头的状态，
+  // 而且跟动图里的数字打架 —— 同一批素材里数字不一致，看着就假。
+  // 先清空 + 重载（seedDemoHistory 会重新造打卡历史），**再推进一次**。
+  console.log('清空 localStorage: ' + JSON.stringify(await ev(cdp, `(() => {
+    try { localStorage.clear(); return 'ok'; } catch (e) { return 'failed: ' + e.message; }
+  })()`)));
+  await ev(cdp, `location.reload()`);
+  await sleep(3400);
+
   const driven = await ev(cdp, DRIVE_PROGRESS);
   console.log('推进今日进度: ' + JSON.stringify(driven));
+  if (!driven || !driven.trace || !driven.trace.length || /抛错/.test(String(driven.trace))) {
+    throw new Error('推进失败，停止出图: ' + JSON.stringify(driven));
+  }
   await sleep(800);
 
   // 面板是 position:absolute 的浮层，在 440 宽视口下就已经是 415x560 的竖版，
