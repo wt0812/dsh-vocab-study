@@ -33,10 +33,26 @@ __pycache__/
 Thumbs.db
 desktop.ini
 
-# ���ؽű���״̬��־��д�� ~/.dsh �£�����ֹ����ֿ⣩
+# 盯守脚本的状态日志（写到 ~/.dsh 下，但防止误落仓库）
 /.pr-watch.log
 
 
-# �����ز��ݴ棨��Ʒ�����棬�����ֿ⣩
+# 宣传素材暂存（成品放桌面，不进仓库）
 /_promo/
+
+
+# ── 凭据：**永远不要提交** ─────────────────────────────────
+# 发布 npm 时会在本机生成 .npmrc（里面有 _authToken）。
+# 只是"现在没提交"不等于"以后不会" —— 所以显式挡在这里。
+# 另外在 GitHub 那边开 secret scanning 也能兜一层。
+.npmrc
+.npmrc.*
+*.npmrc
+# npm 的 2FA 恢复码、token 备份这类文件，习惯上放桌面，一并挡住
+*recovery*codes*.txt
+*token*.txt
+*.pem
+*.key
+.env
+.env.*
 
