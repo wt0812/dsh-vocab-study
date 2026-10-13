@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-12T09:46:20Z
+ * 构建时间：2026-10-13T01:06:44Z
  */
 'use strict';
 
@@ -33084,6 +33084,30 @@ function createApp(ports = {}) {
       session: state.session,
       card: state.session ? S.currentCard(state.session) : null,
       lastReveal: state.lastReveal,
+      /*
+       * 下面这 4 个字段是**漏掉的**，一次补齐（2026-10-12）。
+       *
+       * 症状：视图读 `st.X` 拿到 undefined，于是整块 UI 静默不出现 ——
+       * 都在内部 `state` 上真实存在（后两个还真的有赋值），只是没进快照：
+       *
+       *   · personal          → renderVocab 读 `state.personal`，
+       *                         undefined 恒为假 → 生词本页**永远显示
+       *                         「生词本还是空的」**，手动增删和列表都用不了。
+       *   · words             → 设置页的词库下拉读 `state.words`，拿不到当前词表。
+       *   · lastRevealResult  → app.mjs 里 `state.lastRevealResult = res` 确实在写，
+       *                         但界面读的是快照 → 相关分支永远走不到。
+       *   · report            → `maybeWeeklyReport()` 算出周报后 `state.report = rep`
+       *                         也在写，同样没进快照 → **周报卡片永远不渲染**。
+       *
+       * 为什么之前没发现：面板那套测试只验了四个标签页的**名字**存在
+       * （demo-boot 里 `['今日','进度','生词本','设置']`），没有验页面**内容**。
+       * 所以"页面渲染成空状态"和"正常"在测试里长得一模一样。
+       * 现在 core 测试里加了一条对照断言：快照必须给出视图要读的每个字段。
+       */
+      personal: state.personal,
+      words: state.words,
+      lastRevealResult: state.lastRevealResult,
+      report: state.report,
       offline: state.offline,
       banner: state.banner,
       librarySource: state.librarySource,
@@ -34718,10 +34742,10 @@ function curveSvg(curve) {
     text: `30 天后：按排期 ${Math.round(last.recall * 20)}/20 还记得 · 不管它 ${Math.round(lastP.recall * 20)}/20`,
   };
 }
-function renderProgress(root, state, app) {
+function renderProgress(root, st, app) {
   const { memory: M, queue: Q, game: G } = getCore();
   clear(root);
-  const stats = state.stats;
+  const stats = st.stats;
   const curve = app.retention();
   const c = curveSvg(curve);
 
@@ -34808,7 +34832,7 @@ function shortMeaning(m = '') {
   const t = String(m).split(/[；;]/)[0];
   return t.length > 16 ? `${t.slice(0, 16)}…` : t;
 }
-function renderVocab(root, state, app) {
+function renderVocab(root, st, app) {
   const { library: L, mistake: MK } = getCore();
   clear(root);
   mount(
@@ -34818,11 +34842,11 @@ function renderVocab(root, state, app) {
       class: 'vs-sub',
       text: '在对话里选中一个纯英文单词 → 悬浮条「加入生词本」。收藏时会顺手抓下它在对话里的那句话当例句。',
     }),
-    state.personal && state.personal.length
+    st.personal && st.personal.length
       ? el(
           'div',
           { class: 'vs-list', style: { marginTop: '8px' } },
-          state.personal.map((p) =>
+          st.personal.map((p) =>
             el('div', { class: 'vs-row' }, [
               el('span', { class: 'w', text: p.word }),
               el('span', { class: 'm', text: p.meaning || '（还没释义）' }),
@@ -34878,12 +34902,12 @@ function renderVocab(root, state, app) {
     ]),
   );
 }
-function renderSettings(root, state, app) {
+function renderSettings(root, st, app) {
   const { library: L, queue: Q } = getCore();
   clear(root);
-  const s = state.settings;
+  const s = st.settings;
   const bal = s.balance;
-  const preview = previewBalance(state, app, bal);
+  const preview = previewBalance(st, app, bal);
 
   const setNum = (key) => (ev) => app.updateSettings({ [key]: Number(ev.target.value) });
 
@@ -34933,7 +34957,7 @@ function renderSettings(root, state, app) {
         id: 'vs-balance',
         oninput: (ev) => {
           const v = Number(ev.target.value);
-          const p = previewBalance(state, app, v);
+          const p = previewBalance(st, app, v);
           const node = root.querySelector('#vs-bal-preview');
           if (node) node.textContent = p;
         },
@@ -34955,7 +34979,7 @@ function renderSettings(root, state, app) {
       //
       // 这里原来写的是 `app.updateSettings({ collections: [v] })`，而
       // updateSettings 只在 dailyGoal / balance 变化时重建容器 ——
-      // 于是换库只改了一个字段：state.words 还是老词库的、今日队列还是老的
+      // 于是换库只改了一个字段：st.words 还是老词库的、今日队列还是老的
       // （多半已背完），主页就一直停在「今天没有需要复习的词」。
       // 用户原话：「我明明显示了更换成功但是主页并没有反应」。
       //
@@ -34973,10 +34997,10 @@ function renderSettings(root, state, app) {
         text: c.name,
       }))),
     ]),
-    // 换库结果从**快照**里读（state.lastLibraryChange）：
+    // 换库结果从**快照**里读（st.lastLibraryChange）：
     // 成功换库会 emit() → 整页重绘，只写 DOM 的提示会被冲掉。
-    collectionStatusLine(state.lastLibraryChange),
-    el('div', { class: 'vs-sub', text: state.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
+    collectionStatusLine(st.lastLibraryChange),
+    el('div', { class: 'vs-sub', text: st.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
 
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
     el('div', { class: 'vs-field' }, [

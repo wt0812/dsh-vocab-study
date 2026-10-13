@@ -553,6 +553,111 @@ console.log('\n[4] 逐页签渲染（设置页曾经在这里炸过）');
   }
 }
 
+/*
+ * [4.5] 生词本页要真的**显示单词**。
+ *
+ * 为什么必须单独测这一步：上面 [4] 只验了"切换页签不抛错"，
+ * 而"渲染成空状态"和"渲染正常"在那种断言下**长得一模一样** ——
+ * 一个不抛错的空页面照样满分。
+ *
+ * 于是这个 bug 一直活到了线上：
+ *   renderVocab 读的是 `st.personal`，而 st = app.state = snapshotState()，
+ *   而 snapshotState() **没把 personal 放进快照** → 读到的永远是 undefined
+ *   → `if (st.personal && st.personal.length)` 恒假 → 永远显示「生词本还是空的」。
+ *   用户收藏多少词都看不见，手动增删也用不了。
+ *
+ * 这一节的做法：**先塞一个词进生词本，再去看页面上有没有它**。
+ * 断言的是"页面内容"，不是"没报错"。
+ */
+console.log('\n[4.5] 生词本页真的显示单词（不是空状态）');
+{
+  const cap = rootEl.querySelector('.vs-capsule');
+  if (!cap) {
+    check(false, '找到胶囊（用于验生词本）');
+  } else {
+    cap.dispatchEvent({ type: 'click' });
+    const panel = rootEl.querySelector('.vs-panel');
+    if (!panel) {
+      check(false, '面板已打开（用于验生词本）');
+    } else {
+      const demoApp = panel.__vsApp;
+      check(!!demoApp && typeof demoApp.addPersonal === 'function', '拿到 app 实例且能加生词');
+
+      // 塞两个真实词（词库里有释义，走的是用户真实路径）
+      const added = [];
+      for (const [w, m] of [['abandon', '放弃，抛弃'], ['abundant', '大量的，充裕的']]) {
+        try {
+          demoApp.addPersonal({ word: w, meaning: m }, { source: '测试' });
+          added.push(w);
+        } catch (err) {
+          check(false, `加生词「${w}」不抛错`, err.message);
+        }
+      }
+
+      // 快照里必须有 personal —— 这是本 bug 的根，直接钉住
+      const snap = demoApp.state;
+      check(
+        Array.isArray(snap && snap.personal) && snap.personal.length >= 2,
+        `快照里有 personal 且有条目（实际 ${
+          snap && Array.isArray(snap.personal) ? snap.personal.length : typeof (snap && snap.personal)
+        } 条）`,
+      );
+
+      // 切到生词本页
+      const tabs = panel.querySelectorAll('.vs-tab');
+      const vocabTab = tabs.find((n) => String(n.textContent).indexOf('生词本') >= 0);
+      if (!vocabTab) {
+        check(false, '找到「生词本」页签');
+      } else {
+        vocabTab.dispatchEvent({ type: 'click' });
+
+        const rows = panel.querySelectorAll('.vs-row');
+        check(
+          rows.length >= 2,
+          `生词本页列出了 ${added.length} 个词（实际 ${rows.length} 行）`,
+        );
+
+        // 光有行还不够 —— 行里得真的有那两个字
+        const rowText = rows.map((r) => String(r.textContent || '')).join(' ');
+        for (const w of added) {
+          check(
+            rowText.indexOf(w) >= 0,
+            `生词本页面上能看到「${w}」`,
+            rowText.slice(0, 80),
+          );
+        }
+
+        // 反面：空状态文案不该再出现（它就是 bug 的症状）
+        const empty = panel.querySelector('.vs-empty');
+        const emptyText = empty ? String(empty.textContent || '') : '';
+        check(
+          emptyText.indexOf('生词本还是空的') < 0,
+          '不再显示「生词本还是空的」',
+          emptyText,
+        );
+
+        // 删一个，确认删除按钮真的接在这页上（手动增删是规格 §10 要求的）
+        const delBtn = rows.length
+          ? rows[0].querySelectorAll('.vs-btn')
+          : [];
+        if (delBtn && delBtn.length) {
+          const before = demoApp.state.personal.length;
+          delBtn[delBtn.length - 1].dispatchEvent({ type: 'click' });
+          const after = demoApp.state.personal.length;
+          check(after === before - 1, `点「删」真的删掉一个（${before} → ${after}）`);
+          // 收拾干净，别影响后面的用例
+          for (const w of added) {
+            const hit = (demoApp.raw.personal || []).find((p) => p.word === w);
+            if (hit) demoApp.removePersonal(hit.id);
+          }
+        } else {
+          check(false, '生词本每行有「删」按钮');
+        }
+      }
+    }
+  }
+}
+
 console.log('\n[5] core 自检 0 失败');
 try {
   const selfTest = winFacade.__vsCoreSelfTest || globalThis.__vsCoreSelfTest;

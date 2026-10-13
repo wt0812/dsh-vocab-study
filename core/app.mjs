@@ -84,6 +84,30 @@ export function createApp(ports = {}) {
       session: state.session,
       card: state.session ? S.currentCard(state.session) : null,
       lastReveal: state.lastReveal,
+      /*
+       * 下面这 4 个字段是**漏掉的**，一次补齐（2026-10-12）。
+       *
+       * 症状：视图读 `st.X` 拿到 undefined，于是整块 UI 静默不出现 ——
+       * 都在内部 `state` 上真实存在（后两个还真的有赋值），只是没进快照：
+       *
+       *   · personal          → renderVocab 读 `state.personal`，
+       *                         undefined 恒为假 → 生词本页**永远显示
+       *                         「生词本还是空的」**，手动增删和列表都用不了。
+       *   · words             → 设置页的词库下拉读 `state.words`，拿不到当前词表。
+       *   · lastRevealResult  → app.mjs 里 `state.lastRevealResult = res` 确实在写，
+       *                         但界面读的是快照 → 相关分支永远走不到。
+       *   · report            → `maybeWeeklyReport()` 算出周报后 `state.report = rep`
+       *                         也在写，同样没进快照 → **周报卡片永远不渲染**。
+       *
+       * 为什么之前没发现：面板那套测试只验了四个标签页的**名字**存在
+       * （demo-boot 里 `['今日','进度','生词本','设置']`），没有验页面**内容**。
+       * 所以"页面渲染成空状态"和"正常"在测试里长得一模一样。
+       * 现在 core 测试里加了一条对照断言：快照必须给出视图要读的每个字段。
+       */
+      personal: state.personal,
+      words: state.words,
+      lastRevealResult: state.lastRevealResult,
+      report: state.report,
       offline: state.offline,
       banner: state.banner,
       librarySource: state.librarySource,

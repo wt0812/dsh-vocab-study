@@ -63,10 +63,10 @@ function curveSvg(curve) {
   };
 }
 
-export function renderProgress(root, state, app) {
+export function renderProgress(root, st, app) {
   const { memory: M, queue: Q, game: G } = getCore();
   clear(root);
-  const stats = state.stats;
+  const stats = st.stats;
   const curve = app.retention();
   const c = curveSvg(curve);
 
@@ -155,7 +155,7 @@ function shortMeaning(m = '') {
   return t.length > 16 ? `${t.slice(0, 16)}…` : t;
 }
 
-export function renderVocab(root, state, app) {
+export function renderVocab(root, st, app) {
   const { library: L, mistake: MK } = getCore();
   clear(root);
   mount(
@@ -165,11 +165,11 @@ export function renderVocab(root, state, app) {
       class: 'vs-sub',
       text: '在对话里选中一个纯英文单词 → 悬浮条「加入生词本」。收藏时会顺手抓下它在对话里的那句话当例句。',
     }),
-    state.personal && state.personal.length
+    st.personal && st.personal.length
       ? el(
           'div',
           { class: 'vs-list', style: { marginTop: '8px' } },
-          state.personal.map((p) =>
+          st.personal.map((p) =>
             el('div', { class: 'vs-row' }, [
               el('span', { class: 'w', text: p.word }),
               el('span', { class: 'm', text: p.meaning || '（还没释义）' }),
@@ -226,12 +226,12 @@ export function renderVocab(root, state, app) {
   );
 }
 
-export function renderSettings(root, state, app) {
+export function renderSettings(root, st, app) {
   const { library: L, queue: Q } = getCore();
   clear(root);
-  const s = state.settings;
+  const s = st.settings;
   const bal = s.balance;
-  const preview = previewBalance(state, app, bal);
+  const preview = previewBalance(st, app, bal);
 
   const setNum = (key) => (ev) => app.updateSettings({ [key]: Number(ev.target.value) });
 
@@ -281,7 +281,7 @@ export function renderSettings(root, state, app) {
         id: 'vs-balance',
         oninput: (ev) => {
           const v = Number(ev.target.value);
-          const p = previewBalance(state, app, v);
+          const p = previewBalance(st, app, v);
           const node = root.querySelector('#vs-bal-preview');
           if (node) node.textContent = p;
         },
@@ -303,7 +303,7 @@ export function renderSettings(root, state, app) {
       //
       // 这里原来写的是 `app.updateSettings({ collections: [v] })`，而
       // updateSettings 只在 dailyGoal / balance 变化时重建容器 ——
-      // 于是换库只改了一个字段：state.words 还是老词库的、今日队列还是老的
+      // 于是换库只改了一个字段：st.words 还是老词库的、今日队列还是老的
       // （多半已背完），主页就一直停在「今天没有需要复习的词」。
       // 用户原话：「我明明显示了更换成功但是主页并没有反应」。
       //
@@ -321,10 +321,10 @@ export function renderSettings(root, state, app) {
         text: c.name,
       }))),
     ]),
-    // 换库结果从**快照**里读（state.lastLibraryChange）：
+    // 换库结果从**快照**里读（st.lastLibraryChange）：
     // 成功换库会 emit() → 整页重绘，只写 DOM 的提示会被冲掉。
-    collectionStatusLine(state.lastLibraryChange),
-    el('div', { class: 'vs-sub', text: state.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
+    collectionStatusLine(st.lastLibraryChange),
+    el('div', { class: 'vs-sub', text: st.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
 
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
     el('div', { class: 'vs-field' }, [

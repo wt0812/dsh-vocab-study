@@ -401,6 +401,83 @@ if (fail === 0) {
     })(),
   ]);
 
+  /*
+   * 快照必须给全视图要读的字段。
+   *
+   * 为什么需要这条：视图读的是 `app.state`（= snapshotState() 的返回值），
+   * 而不是 app 内部的 state。**少给一个字段，读到的就是 undefined**，
+   * 而 undefined 在 `if (st.x && st.x.length)` 里和平常一样安静 ——
+   * 于是整块 UI 静默不出现，测试里也看不出来。
+   *
+   * 实际踩到：personal 漏进快照 → 生词本页永远显示「生词本还是空的」，
+   * report / lastRevealResult 漏了 → 周报卡片和"上次揭示"永远不渲染
+   * （这两个在 app 内部明明有赋值）。三处同一个原因。
+   *
+   * ⚠️ 写这条断言本身踩了一个坑，记下来：
+   * 第一版按行做正则匹配键（"identifier 后面接冒号"），结果这段注释里
+   * 写的字面量键名**被当成了真的键** —— 于是把真字段删掉、断言照样通过，
+   * 是个假闸门。所以现在改成：**先剥掉所有注释**，再按逗号做结构化切分。
+   * （和上面 CSS 那条断言同一个教训：解析源码文本的第一步永远是去注释。）
+   */
+  extras.push([
+    '快照给全了视图要读的字段（st.X 不能有 undefined 缺口）',
+    (() => {
+      const src = readFileSync(new URL('../core/app.mjs', import.meta.url), 'utf8');
+      const i = src.indexOf('function snapshotState()');
+      if (i < 0) return false;
+      const b0 = src.indexOf('return {', i);
+      if (b0 < 0) return false;
+      const ob = src.indexOf('{', b0);
+      let depth = 0; let end = -1;
+      for (let k = ob; k < src.length; k++) {
+        if (src[k] === '{') depth++;
+        else if (src[k] === '}') { depth--; if (depth === 0) { end = k; break; } }
+      }
+      if (end < 0) return false;
+
+      // 先剥注释 —— 否则注释里写的键名会被当成真键
+      const bare = src.slice(ob + 1, end)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+
+      // 按顶层逗号切分（跟踪括号深度），每段取第一个标识符当键
+      const keys = new Set();
+      let d = 0; let cur = '';
+      const segs = [];
+      for (const ch of bare) {
+        if (ch === '(' || ch === '[' || ch === '{') d++;
+        else if (ch === ')' || ch === ']' || ch === '}') d--;
+        if (ch === ',' && d === 0) { segs.push(cur); cur = ''; } else cur += ch;
+      }
+      segs.push(cur);
+      for (const s of segs) {
+        const m = s.trim().match(/^([A-Za-z_$][\w$]*)\s*(?::|$)/);
+        if (m) keys.add(m[1]);
+      }
+      if (keys.size < 20) return false; // 解析失败就别假装通过
+
+      const used = new Set();
+      for (const f of ['../ui/panel.mjs', '../ui/pages.mjs']) {
+        const t = readFileSync(new URL(f, import.meta.url), 'utf8');
+        // ⚠️ 这里**不能**用 \bst\. —— \b 只要求前面不是单词字符，
+        //    而 `document.body.xxx` 里的 "st." 前面是 'o'？不，前面是 'd'…
+        //    真正的坑是别处：这个正则会匹配到字符串字面量里的 "st."。
+        //    我第一版就是这么写的，结果 `used` 里混进了 body/tabs 之类的 DOM 名词，
+        //    而 `personal` 压根没进去 —— 断言看着在跑，其实恒为真（假闸门）。
+        //    现在要求 st 的前一个字符既不是单词字符也不是点。
+        for (const m of t.matchAll(/(?<![\w$.])st\.([A-Za-z_$][\w$]*)/g)) used.add(m[1]);
+      }
+      // 必须真的收集到东西，否则断言等于没跑
+      if (used.size < 8) return false;
+      const missing = [...used].filter((k) => !keys.has(k)).sort();
+      if (missing.length) {
+        console.log(`      ↑ 快照缺字段: ${missing.join(', ')}`);
+        return false;
+      }
+      return true;
+    })(),
+  ]);
+
   console.log('\n健全性附加检查：');
   let extraFail = 0;
   for (const [name, ok] of extras) {
