@@ -36,7 +36,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 | 项 | 说明 |
 |---|---|
 | 版本 | `0.2.4`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
-| 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 392 条断言全绿（详见[测试](#测试)） |
+| 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 393 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
 | 体积 | `lib/client.js` 3,002,297 B ≈ **2.86 MB**（内含六本词库共 **29,841** 词，见[为什么这么大](#构建)） |
 | 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
@@ -494,14 +494,14 @@ node test/multi-conversation.test.mjs
 > 现在 `test/` 不进包，`test/core.test.mjs` 里有一条断言守着这件事（会红那种）。
 > **要跑测试就克隆仓库**，`test/` 和源码都在那里。
 
-**「392 条断言」是怎么数的**（口径写在这里，免得下次自己都对不上）：
+**「393 条断言」是怎么数的**（口径写在这里，免得下次自己都对不上）：
 **每个套件打印的汇总数字 + 该套件「健全性附加检查」里 ✓ 的条数**。
 
 > 为什么不是只数汇总行：`core.test.mjs` 先打印 `85 通过 / 0 失败`，**之后**才跑一段
 > 附加体检，那些 ✓ 不在汇总里。只抓汇总的话，附加检查里加多少条、数字都不动 ——
 > 我吃过这个亏：新加了 8 条断言，总数还是 372，一度以为没生效。
 > 现算的完整明细（`node tools/make-promo.mjs --count` 输出）：
-> `core=105  demo-boot=62  round-control=100  mount=33  plugin=33  bundle-audit=28  client-activation=18  multi-conversation=13`。
+> `core=106  demo-boot=62  round-control=100  mount=33  plugin=33  bundle-audit=28  client-activation=18  multi-conversation=13`。
 
 ### CI
 
