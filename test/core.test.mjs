@@ -15,7 +15,7 @@ import * as L from '../core/library.mjs';
 import * as G from '../core/game.mjs';
 import * as MK from '../core/mistake.mjs';
 import * as HK from '../core/hook.mjs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -597,6 +597,59 @@ if (fail === 0) {
         return false;
       }
       console.log(`      library 导出 ${exported.size} 个 / app 用到 ${used.size} 个，两份清单都齐`);
+      return true;
+    })(),
+  ]);
+
+  /**
+   * npm 包内容守卫。
+   *
+   * 为什么需要：0.2.3 发布出去之后我从 registry 真装了一遍，8 个套件里**红了 5 个** ——
+   * `files` 里有 `test/`，但**没列 `core/` `store/` `ui/` `adapter/`**，
+   * 于是包里的测试连 `import` 都过不去。而且这个毛病**所有历史版本都有**。
+   *
+   * 两条约束，各自守一个方向：
+   *   (a) 运行必需的东西一个都不许少 —— 少了用户装出来是坏的；
+   *   (b) `test/` 不许进包 —— 它进包必然跑不起来（包里没有构建工具链，
+   *       而且 `demo-boot` 要的 `demo/` 是 25.7 MB，补不得），
+   *       于是"install 完跑 npm test"只会得到一堆假红，比不发更坏。
+   *
+   * 这一条**不能靠读 README 或靠记得** —— 它正是"没人守"才漏掉的那种。
+   */
+  extras.push([
+    'package.json 的 files：运行必需的都在、test/ 不在（否则包里测试必红）',
+    (() => {
+      const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+      const files = pkg.files ?? [];
+      const problems = [];
+
+      // (a) 运行/分发必需的
+      for (const need of ['lib', 'cordis.patch.yml', 'README.md', 'assets']) {
+        if (!files.includes(need)) problems.push(`files 少了「${need}」`);
+      }
+      // 产物文件必须真的存在，并且在 files 覆盖范围内
+      for (const art of ['lib/client.js', 'lib/index.js', 'cordis.patch.yml']) {
+        if (!existsSync(new URL(`../${art}`, import.meta.url))) problems.push(`产物不存在：${art}`);
+      }
+      if (existsSync(new URL('../lib/client.js', import.meta.url))) {
+        const sz = statSync(new URL('../lib/client.js', import.meta.url)).size;
+        if (sz < 1_000_000) problems.push(`lib/client.js 只有 ${sz} B，不像是构建过的产物`);
+      }
+
+      // (b) test/ 不许进包
+      if (files.includes('test')) {
+        problems.push('files 里有「test」—— 包里没有构建工具链，测试必然红，别发出去');
+      }
+      // 顺带守住：scripts.test 仍然可用（它只在仓库里跑）
+      if (!pkg.scripts?.test?.includes('test/core.test.mjs')) {
+        problems.push('scripts.test 不见了（仓库里应该还能一键跑测试）');
+      }
+
+      if (problems.length) {
+        console.log(`      ↑ ${problems.join('; ')}`);
+        return false;
+      }
+      console.log(`      files=${files.length} 项，运行必需齐全、test/ 未进包`);
       return true;
     })(),
   ]);
