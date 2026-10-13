@@ -172,7 +172,25 @@ export function renderVocab(root, st, app) {
           st.personal.map((p) =>
             el('div', { class: 'vs-row' }, [
               el('span', { class: 'w', text: p.word }),
+              // 词性 + 音标：`addPersonal` 现在会自动从内置词库补（离线查词），
+              // 以前这两栏**永远是空的** —— 因为唯一的收录入口传的是空释义。
+              p.pos || p.ipa
+                ? el('span', { class: 'vs-sub', style: { margin: '0 6px', whiteSpace: 'nowrap' } },
+                    `${p.pos || ''}${p.pos && p.ipa ? ' ' : ''}${p.ipa || ''}`)
+                : null,
               el('span', { class: 'm', text: p.meaning || '（还没释义）' }),
+              // 查不到的词（人名、缩写、生僻词、词组）得有个出口。
+              // 以前这一行**完全没有编辑入口**，用户只能删掉重来 —— 而重来还是空的。
+              el('input', {
+                class: 'vs-input',
+                style: { width: '92px', marginLeft: '6px' },
+                placeholder: '补释义',
+                value: p.meaning || '',
+                id: `vs-mean-${p.id}`,
+                onchange: (ev) => {
+                  app.setPersonalMeaning(p.id, ev.target.value);
+                },
+              }),
               el(
                 'button',
                 {
@@ -187,6 +205,41 @@ export function renderVocab(root, st, app) {
           ),
         )
       : el('div', { class: 'vs-empty', text: '生词本还是空的' }),
+
+    /*
+     * 「今天没记住的几个词」提示（2026-10-12 新增）。
+     *
+     * 用户的实测反馈：「我今天背的不熟的也会加进去」。他不想要自动塞 ——
+     * 选的是**给提示**：生词本始终是他自己认可的词，但不用他自己去回想今天错了哪几个。
+     *
+     * 口径：今天答错过的词（`app.unfamiliarToday`）。已经在生词本里的不重复提示。
+     * 点「先不用」存盘，当天不再弹；跨天自动恢复。
+     */
+    st.unfamiliarCount
+      ? el('div', { class: 'vs-gate', style: { marginTop: '10px' } }, [
+          el('div', { class: 'vs-gate-note', text: `今天有 ${st.unfamiliarCount} 个词没记住，要加进生词本吗？` }),
+          el('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' } }, [
+            el('button', {
+              class: 'vs-btn primary',
+              onclick: () => app.addUnfamiliarToday(),
+            }, `加进来（${st.unfamiliarCount} 个）`),
+            el('button', {
+              class: 'vs-btn muted',
+              onclick: () => app.dismissUnfamiliarHint(),
+            }, '先不用'),
+          ]),
+        ])
+      : null,
+
+    // 「已收服 N 词」——用户选了「自动删但留记录」，那记录总得**看得见**，
+    // 否则「自动删」在他眼里就等于"词莫名消失了"。
+    st.archivedPersonal && st.archivedPersonal.length
+      ? el('div', {
+          class: 'vs-sub',
+          style: { marginTop: '8px' },
+          text: `已收服 ${st.archivedPersonal.length} 个（不再出现在上面列表里，学习记录仍在）`,
+        })
+      : null,
 
     el('div', { class: 'vs-h2', text: '批量导入' }),
     el('div', { class: 'vs-sub', text: '粘贴一段英文，自动切词收录。' }),
@@ -290,10 +343,21 @@ export function renderSettings(root, st, app) {
       el('div', { class: 'preview', id: 'vs-bal-preview', text: preview }),
     ]),
 
+    // 这里原来标签写的是「碎片冲刺」—— 那是规格 §5.1 里的**设计概念名**
+    // （原意："用零碎时间背一小轮，答完即结算、不设倒计时"；限时闯关那一版
+    // 已经被砍了）。用户看到这个标签直接问「碎片冲刺是什么」，因为标签是黑话、
+    // 下面的下拉框才是实话。现在标签写实话，黑话挪进小字注解。
     el('div', { class: 'vs-h2', text: '一轮几个词' }),
     el('div', { class: 'vs-field' }, [
-      el('label', {}, ['碎片冲刺', el('span', { class: 'note', text: '答完即结算，不设倒计时' })]),
+      el('label', {}, ['背完一轮要答对几个词', el('span', { class: 'note', text: '答完即结算，不设倒计时（碎片冲刺）' })]),
       select([3, 5, 10], s.roundSize, (v) => app.updateSettings({ roundSize: v })),
+    ]),
+
+    // 「再来几个新词」一次加多少。以前界面上写死 `app.extendRound(5)`，
+    // 用户找不到地方改（他的原话：「再来几个这个数量的设置似乎没有」）。
+    el('div', { class: 'vs-field' }, [
+      el('label', {}, ['点「再来几个」时加几个', el('span', { class: 'note', text: '接在正在背的这一轮后面' })]),
+      select([3, 5, 10], s.extendBatch, (v) => app.updateSettings({ extendBatch: v })),
     ]),
 
     el('div', { class: 'vs-h2', text: '词库' }),

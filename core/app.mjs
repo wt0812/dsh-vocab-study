@@ -52,6 +52,21 @@ export function createApp(ports = {}) {
     librarySource: 'seed',
     /** 换词库的一次性结果，给设置页显示；成功/失败/原因都放这里（别只写 DOM） */
     lastLibraryChange: null,
+    /*
+     * 已收服的生词本档案（2026-10-12 新增）。
+     *
+     * 用户的要求：「真正确定收服就可以自动删」+「留记录」。
+     * 所以收服的词从**生词本列表**里移走，但在这里留一条最小记录。
+     *
+     * 为什么只存 {word, id, ts, collection} 而不是整条词目：
+     * 词目本身在词库里、随时能按 id 查回来（`L.lookupWord`），
+     * 而且 `state.words` 每次 init 都由「词库 + state.personal」重建 ——
+     * 所以移走**不会丢任何词**，记忆数据也一个字都不动。
+     * 万一它其实没记牢（判定再硬也是模型算的），下次忘了还能重新进来。
+     */
+    archivedPersonal: [],
+    /** 「今天这几个词没记住」的提示被忽略到哪一天（同一天不再反复烦） */
+    hintDismissedDay: null,
   };
 
   const listeners = new Set();
@@ -108,6 +123,10 @@ export function createApp(ports = {}) {
       words: state.words,
       lastRevealResult: state.lastRevealResult,
       report: state.report,
+      // 已收服档案 + 「今天没记住」提示（2026-10-12 新增功能，同样必须进快照，
+      // 否则生词本页读到的又是 undefined —— 就是上面那个 bug 的同一种死法）。
+      archivedPersonal: state.archivedPersonal,
+      unfamiliarCount: dismissHintToday() ? 0 : unfamiliarToday().length,
       offline: state.offline,
       banner: state.banner,
       librarySource: state.librarySource,
@@ -177,6 +196,10 @@ export function createApp(ports = {}) {
     // history 是 persist() 一直在写、这边却漏读的另一个字段：
     // 「连续 3 天完成 → 自动回到 N」（effectiveBaseN）要靠 history.days。
     state.history = saved.history || { days: [] };
+    // 已收服档案 + 提示忽略日期（不读回来的话，每次重开面板收服记录就没了，
+    // 提示也会在同一天反复弹 —— 和 history 当初漏读是同一类错）。
+    state.archivedPersonal = Array.isArray(saved.archivedPersonal) ? saved.archivedPersonal : [];
+    state.hintDismissedDay = saved.hintDismissedDay || null;
 
     // 0 屏提问（§11）：默认四级，直接开背；首屏不问任何东西
     const coll = state.settings.collections?.[0] || 'cet4';
@@ -186,6 +209,14 @@ export function createApp(ports = {}) {
     state.offline = res.offline;
     state.banner = res.banner;
     state.librarySource = res.source;
+
+    // 启动时也归档一次「已收服」的生词本词条。
+    //
+    // 为什么启动时也要做：判定依据里有**时间**（记忆强度随天数衰减，
+    // isConquered 看的是此刻的强度）。用户昨天答对、今天强度够 0.9 了，
+    // 如果只在答题那一刻检查，这一批就要等到他下次答题才会被发现。
+    // 放在 init 里、且 emit 在它之后，界面第一次画出来就是归档后的状态。
+    archiveConqueredPersonal();
 
     // 崩溃恢复：存在未结算的 sessionId → 恢复队列顺序与剩余词，已答过的不重考（§7.2）
     const snap = await storage.get('session');
@@ -300,6 +331,14 @@ export function createApp(ports = {}) {
       aiMode: s.aiMode || 'ondemand', // off | ondemand | all
       masterEnabled: s.masterEnabled !== false, // AI 增强总开关（默认开）
       roundSize: s.roundSize || 5, // 碎片冲刺 3/5/10
+      /*
+       * 「再来几个新词」一次加多少（2026-10-12 新增）。
+       *
+       * 用户在设置页找不到这个 —— 因为以前它根本不存在：界面上写死了
+       * `app.extendRound(5)`，想改只能改代码。现在变成可设项，默认仍是 5
+       * （和以前的行为一致，老用户升上来不会突然变样）。
+       */
+      extendBatch: s.extendBatch || 5,
       paused: s.paused || null,
       vacationUntil: s.vacationUntil || null,
       dismissedProposals: s.dismissedProposals || {},
@@ -396,8 +435,16 @@ export function createApp(ports = {}) {
    * **只建设 step 个**。排除发生在池子源头（见 queue.mjs 的 skip），
    * 所以学过的词不会从复习池绕回来；再叠一层严格上限，凑不满就凑不满。
    */
-  function extendRound(batch = 5) {
-    const step = Math.max(1, Math.min(20, Math.round(batch) || 5));
+  /**
+   * 「再来 N 个新词」——本轮再多排 N 个**没排过**的词，接在正在背的这一轮后面。
+   *
+   * N 的来路（2026-10-12 起）：优先用显式传入的 batch（测试和内部调用用），
+   * 没传就读用户在设置页选的 `settings.extendBatch`。以前界面上写死 5，
+   * 用户找不到地方改 —— 现在改成可设项。
+   */
+  function extendRound(batch = null) {
+    const want = batch ?? state.settings?.extendBatch ?? 5;
+    const step = Math.max(1, Math.min(20, Math.round(want) || 5));
     const key = state.dayKey || Q.dayKey(now());
 
     const prev = Array.isArray(state.roundItems) ? state.roundItems : [];
@@ -708,6 +755,9 @@ export function createApp(ports = {}) {
     }
     writeRecord({ mode: 'quiz', rating: res.correct ? S.RATING.KNOWN : S.RATING.FORGOT, correct: res.correct, card, extra: { chosen: res.chosen?.id } });
     persist();
+    // 答对之后才可能「收服」——所以在这里检查一次自动归档，紧接着再 emit，
+    // 界面刷新时看到的就是「已经移走」之后的状态（不会先画出来再消失一下）。
+    archiveConqueredPersonal();
     emit();
     return res;
   }
@@ -1024,17 +1074,38 @@ export function createApp(ports = {}) {
   // ── 生词本（§10）──
   function addPersonal(word, { context = null, source = null } = {}) {
     const id = word.id || `personal:${String(word.word).toLowerCase()}`;
-    const entry = {
-      id,
-      word: word.word,
+    /*
+     * 收录时**自动补释义**。
+     *
+     * 之前这里是照抄调用方给的内容，而唯一的调用点传的是 `meaning: ''`
+     * —— 于是生词本里永远显示「（还没释义）」。可内置 6 个词库（29,841 词）
+     * 本来就带音标和释义，只是从来没人去查过。
+     *
+     * 顺序：**调用方明确给了就用给的**（以后悬浮条可能会带上上下文里的释义），
+     * 只有缺了才去词库查。查得到就把音标/词性/释义一起补上；查不到才留空，
+     * 由界面显示「（还没释义）」并给出手填入口。
+     *
+     * `lookupWord` 读的是打包进产物的种子数据，所以这里是同步、离线、零等待的。
+     */
+    const given = {
       ipa: word.ipa || '',
       pos: word.pos || '',
       meaning: word.meaning || '',
+    };
+    const hit = given.meaning ? null : L.lookupWord(word.word, word.collection || null);
+    const entry = {
+      id,
+      word: word.word,
+      ipa: given.ipa || (hit ? hit.ipa : ''),
+      pos: given.pos || (hit ? hit.pos : ''),
+      meaning: given.meaning || (hit ? hit.meaning : ''),
       example: context || word.example || null,
       collection: 'personal',
       personal: true,
       addedTs: now(),
       source,
+      // 释义哪来的：'manual' 人填的 / 'lookup' 词库查到的 / '' 还没有
+      meaningSource: given.meaning ? 'manual' : (hit ? 'lookup' : ''),
       seq: 100000 + state.personal.length,
     };
     state.personal = [...state.personal.filter((p) => p.id !== id), entry];
@@ -1044,10 +1115,122 @@ export function createApp(ports = {}) {
     emit();
     return entry;
   }
+
+  /**
+   * 手动给生词本里的某个词补/改释义（界面上那个手填入口）。
+   *
+   * 为什么要有：查词库查不到的（人名、缩写、生僻词、词组）总得有个出口。
+   * 之前那一行**完全没有编辑入口**，用户只能删掉重来 —— 而重来还是空的。
+   */
+  function setPersonalMeaning(id, meaning) {
+    const text = String(meaning ?? '').trim();
+    const cur = (state.personal || []).find((p) => p.id === id);
+    if (!cur) return null;
+    const next = { ...cur, meaning: text, meaningSource: text ? 'manual' : '' };
+    state.personal = state.personal.map((p) => (p.id === id ? next : p));
+    state.words = mergePersonal(state.words, [next]);
+    persist();
+    emit();
+    return next;
+  }
+
   function removePersonal(id) {
     state.personal = state.personal.filter((p) => p.id !== id);
     persist();
     emit();
+  }
+
+  /**
+   * 「今天没记住的几个词」—— 生词本页那条提示的数据源。
+   *
+   * 用户的实测反馈：「我今天背的不熟的也会加进去」。他原话里没说多不熟算不熟，
+   * 所以我选了**最容易被用户预判**的口径 —— **今天答错过的词**。
+   * 没用「记忆强度低于某阈值」那种口径：用户没法从界面上知道一个词现在强度
+   * 是多少，那样弹出来的提示会显得无缘无故。
+   *
+   * 已经在生词本里的词不重复提示（用户已经认可过了）。
+   * 返回的是**词对象数组**，因为界面要显示单词和释义。
+   */
+  function unfamiliarToday() {
+    const seen = new Set();
+    const out = [];
+    const inPersonal = new Set((state.personal || []).map((p) => p.id));
+    // 这个函数**每次快照渲染都会跑一遍**（界面读 st.unfamiliarCount），
+    // 所以按 id 建一次 Map 再查，别对每个候选做一遍 O(n) 的 find ——
+    // 词表 7000 词 × 今天 200 条记录那个量级下是 140 万次比较，白卡一帧。
+    const byId = new Map();
+    for (const w of state.words || []) if (w && w.id) byId.set(w.id, w);
+    for (const it of state.container?.items || []) {
+      if (it && it.word && it.word.id && !byId.has(it.word.id)) byId.set(it.word.id, it.word);
+    }
+    for (const r of state.records || []) {
+      if (r.dayKey !== state.dayKey) continue;   // 只看今天
+      if (!r.incorrect) continue;                // 只看答错的
+      const wid = r.wordId;
+      if (!wid || seen.has(wid) || inPersonal.has(wid)) continue;
+      seen.add(wid);
+      const w = byId.get(wid);
+      if (w) out.push(w);
+    }
+    return out;
+  }
+
+  /** 把「今天没记住的几个词」一次性收进生词本（用户点了提示上的按钮）。 */
+  function addUnfamiliarToday() {
+    const list = unfamiliarToday();
+    if (!list.length) return 0;
+    for (const w of list) addPersonal(w, { source: '今日没记住' });
+    return list.length;
+  }
+
+  /** 用户点了提示上的「先不用」：今天不再提示（存盘，重开也不再弹）。 */
+  function dismissUnfamiliarHint() {
+    state.hintDismissedDay = state.dayKey;
+    persist();
+    emit();
+  }
+
+  /** 今天这条提示是否已经被用户「先不用」掉了（跨天自动恢复）。 */
+  function dismissHintToday() {
+    return state.hintDismissedDay === state.dayKey;
+  }
+
+  /**
+   * 已收服的生词本词条 → 自动从**列表**里移走，同时留一条档案。
+   *
+   * 用户的要求：「真正确定收服就可以自动删」+「留记录」。
+   *
+   * 三条安全边界（这是会动数据的地方，必须写清楚）：
+   *   1. **只动 `state.personal` 这一个列表。** 不碰 `mem`（记忆强度/稳定性）、
+   *      不碰 `records`（答题记录）、不碰 `confusions`。判定哪怕算错，
+   *      代价也只是一行从列表里挪走。
+   *   2. `state.words` 每次 init 都由「词库 + state.personal」重建，
+   *      所以挪走**不丢词** —— 词还在词库里，下次忘了照样能排进队列。
+   *   3. 档案只存最小信息（词、id、时间、原词库）。词目能按 id 查回来
+   *      （`L.lookupWord`），不重复存一份，省体积。
+   *
+   * 判定用的既有硬标准：`M.isConquered` = 强度 ≥ 0.9 **且**在辨词里答对过。
+   *
+   * @returns {number} 本次移走几条
+   */
+  function archiveConqueredPersonal() {
+    const list = state.personal || [];
+    if (!list.length) return 0;
+    const t = now();
+    const gone = list.filter((p) => {
+      const m = state.mem?.[p.id];
+      return !!m && M.isConquered(m, t);
+    });
+    if (!gone.length) return 0;
+    const goneIds = new Set(gone.map((p) => p.id));
+    state.personal = list.filter((p) => !goneIds.has(p.id));
+    state.archivedPersonal = [
+      ...(state.archivedPersonal || []),
+      ...gone.map((p) => ({ id: p.id, word: p.word, ts: t, collection: p.collection || null })),
+    ];
+    persist();
+    emit();
+    return gone.length;
   }
 
   // ── 情绪胶囊（§3）──
@@ -1112,6 +1295,9 @@ export function createApp(ports = {}) {
       exp: state.exp,
       pause: state.pause,
       history: state.history,
+      // 已收服档案 / 提示忽略日期 —— 少写一个就等于每次重开都丢。
+      archivedPersonal: state.archivedPersonal,
+      hintDismissedDay: state.hintDismissedDay,
     });
     if (state.session) storage.set('session', S.snapshot(state.session));
   }
@@ -1140,6 +1326,11 @@ export function createApp(ports = {}) {
     setVacation,
     addPersonal,
     removePersonal,
+    setPersonalMeaning,
+    unfamiliarToday,
+    addUnfamiliarToday,
+    dismissUnfamiliarHint,
+    archiveConqueredPersonal,
     acceptProposal,
     dismissProposal,
     beckon,

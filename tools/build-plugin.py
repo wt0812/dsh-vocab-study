@@ -53,7 +53,7 @@ CORE_EXPORTS = [
                "SEED_EXAM_COUNTS"]),
     ("L", ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
            "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
-           "contextSentence", "SEED_CET4"]),
+           "contextSentence", "lookupWord", "SEED_CET4"]),
     ("SP", ["speechAvailable", "speak", "stopSpeaking", "speechSupportedLanguages"]),
     ("HK", ["HOOK_SOURCE", "HOOK_MAX_CHARS", "buildHook", "buildHooks", "createHookCache"]),
     ("Q", ["DAY_START_HOUR", "dayKey", "dayStartTs", "daysBetweenKeys", "priorDayKey",

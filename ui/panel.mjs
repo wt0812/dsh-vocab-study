@@ -229,7 +229,7 @@ export function createPanel(app, ctx = {}) {
             ? el('div', { style: { textAlign: 'center' } },
                 el('button', { class: 'vs-btn primary', onclick: () => app.restartRound() }, '再背一轮'))
             : null,
-          // ② 自己往后背：突破当天计划，每次 +5
+          // ② 自己往后背：突破当天计划，每次加的数量由**设置页决定**（原来写死 5）。
           //
           // 闸门关着时**不给这个按钮**。实测过：闸门一关，新词池就被挡住，
           // extendRound 会把容器从 20 扩到 25，但新增词数是 0 —— 按钮点下去
@@ -237,7 +237,12 @@ export function createPanel(app, ctx = {}) {
           // 直接不显示它，只留下真正有效的那条路（「我还是想继续」）。
           !gate.closed
             ? el('div', { style: { textAlign: 'center' } },
-                el('button', { class: 'vs-btn', onclick: () => app.extendRound(5) }, '再来 5 个新词'))
+                el(
+                  'button',
+                  { class: 'vs-btn', onclick: () => app.extendRound() },
+                  // 按钮上的数字跟着设置走，不然用户改了设置、按钮还写 5，会以为没生效。
+                  `再来 ${st.settings?.extendBatch || 5} 个新词`
+                ))
             : null,
           // ③ 安全阀关着时，把门交给用户自己开
           gate.closed

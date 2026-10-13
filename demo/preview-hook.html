@@ -935,7 +935,7 @@ body { margin: 0; background: #14120F; }
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-13T01:06:44Z
+ * 构建时间：2026-10-13T01:51:32Z
  */
 'use strict';
 
@@ -32287,6 +32287,75 @@ function seedFor(collection = 'cet4') {
   );
 }
 
+/**
+ * 按单词拼写查内置词库，拿到音标 / 词性 / 释义。
+ *
+ * 为什么要有它：用户在对话里划一个词加进生词本、或者批量粘贴一整段英文
+ * 收录进来的词，**本来就没带释义** —— 收的时候给的是 `meaning: ''`，
+ * 于是生词本里永远显示「（还没释义）」。而内置的 6 个词库（29,841 词）
+ * 里本来就带着音标和释义，只是从来没人去查。
+ *
+ * 关键点：`seedFor()` 读的是打包进产物的种子数据，所以这个查询是
+ * **同步、纯离线、零网络**的 —— 不需要等 `init()`，也不需要 await。
+ *
+ * 查询范围：6 个词库全查（cet4 → cet6 → kaoyan → ielts → toefl → gre 的键序），
+ * 一个词在多个考纲里都出现时**按这个顺序取第一次命中**，结果稳定。
+ * 找不到就返回 null，调用方负责显示「（还没释义）」并给手填入口。
+ *
+ * @param {string} word 单词拼写（大小写不敏感，忽略首尾空白）
+ * @param {string} [preferCollection] **当前未使用**，保留参数是为了调用方签名稳定。
+ *   （曾经想做"优先用当前词库的释义"，但那样同一个词的释义会因为用户在背哪本
+ *   而变，生词本里的释义会自己跳变 —— 明确不做，所以也不假装支持。）
+ * @returns {{word, ipa, pos, meaning, collection, id}|null}
+ */
+/**
+ * `lookupWord` 的小写拼写 → 词条 索引，首次查词时懒建（见该函数内的说明）。
+ * 模块级变量：摊平进产物后就是顶层绑定，整包共享一份。
+ */
+let LOOKUP_INDEX = null;
+function lookupWord(word, preferCollection = null) {
+  const key = String(word ?? '').trim().toLowerCase();
+  if (!key || !/^[a-z][a-z'-]*$/.test(key)) return null;
+
+  /*
+   * 懒建索引（首次调用时建，之后复用）。
+   *
+   * 为什么需要：6 个词库一共 29,841 个词，如果每次都线性扫一遍，
+   * 批量导入 50 个词就是 50 × 29,841 ≈ 150 万次字符串比较 —— 卡在点击那一帧里。
+   * 建一次 Map 是 3 万次插入，之后每次查词就是一次哈希查找。
+   *
+   * 每个词只留**第一次**命中（顺序就是 COLLECTIONS 的键序），
+   * 所以「同一个词在多个考纲里都有」时结果稳定、不会因为查询顺序变化而改释义。
+   * 代价是拿不到「这个词在 GRE 里也出现」这类信息 —— 界面不需要，不为此增复杂。
+   */
+  if (!LOOKUP_INDEX) {
+    LOOKUP_INDEX = new Map();
+    for (const c of Object.keys(COLLECTIONS)) {
+      for (const w of seedFor(c)) {
+        const k = String(w.word).toLowerCase();
+        if (!LOOKUP_INDEX.has(k)) LOOKUP_INDEX.set(k, { entry: w, collection: c });
+      }
+    }
+  }
+
+  const hit = LOOKUP_INDEX.get(key);
+  if (!hit) return null;
+  const { entry: w, collection: c } = hit;
+
+  // 种子里的考试词库只有 word/ipa/meaning（没有词性字段），
+  // 就从释义开头把「n.」「vt.」这种标记抠出来当 pos。
+  const meaning = w.meaning || '';
+  const m = meaning.match(/^\s*((?:[a-z]+\.){1,3})\s*/i);
+  return {
+    word: w.word,
+    ipa: w.ipa || '',
+    pos: w.pos || (m ? m[1] : ''),
+    meaning: (m ? meaning.slice(m[0].length) : meaning).trim() || meaning,
+    collection: c,
+    id: w.id || `${c}:${w.word}`,
+  };
+}
+
 /** 给词库种入初始记忆（e=0.3，区分「真会」与「未校准」—— 规格 §5.4）。 */
 function seedMemories(words, existing = {}, now = Date.now()) {
   const mem = { ...existing };
@@ -33986,6 +34055,21 @@ function createApp(ports = {}) {
     librarySource: 'seed',
     /** 换词库的一次性结果，给设置页显示；成功/失败/原因都放这里（别只写 DOM） */
     lastLibraryChange: null,
+    /*
+     * 已收服的生词本档案（2026-10-12 新增）。
+     *
+     * 用户的要求：「真正确定收服就可以自动删」+「留记录」。
+     * 所以收服的词从**生词本列表**里移走，但在这里留一条最小记录。
+     *
+     * 为什么只存 {word, id, ts, collection} 而不是整条词目：
+     * 词目本身在词库里、随时能按 id 查回来（`L.lookupWord`），
+     * 而且 `state.words` 每次 init 都由「词库 + state.personal」重建 ——
+     * 所以移走**不会丢任何词**，记忆数据也一个字都不动。
+     * 万一它其实没记牢（判定再硬也是模型算的），下次忘了还能重新进来。
+     */
+    archivedPersonal: [],
+    /** 「今天这几个词没记住」的提示被忽略到哪一天（同一天不再反复烦） */
+    hintDismissedDay: null,
   };
 
   const listeners = new Set();
@@ -34042,6 +34126,10 @@ function createApp(ports = {}) {
       words: state.words,
       lastRevealResult: state.lastRevealResult,
       report: state.report,
+      // 已收服档案 + 「今天没记住」提示（2026-10-12 新增功能，同样必须进快照，
+      // 否则生词本页读到的又是 undefined —— 就是上面那个 bug 的同一种死法）。
+      archivedPersonal: state.archivedPersonal,
+      unfamiliarCount: dismissHintToday() ? 0 : unfamiliarToday().length,
       offline: state.offline,
       banner: state.banner,
       librarySource: state.librarySource,
@@ -34111,6 +34199,10 @@ function createApp(ports = {}) {
     // history 是 persist() 一直在写、这边却漏读的另一个字段：
     // 「连续 3 天完成 → 自动回到 N」（effectiveBaseN）要靠 history.days。
     state.history = saved.history || { days: [] };
+    // 已收服档案 + 提示忽略日期（不读回来的话，每次重开面板收服记录就没了，
+    // 提示也会在同一天反复弹 —— 和 history 当初漏读是同一类错）。
+    state.archivedPersonal = Array.isArray(saved.archivedPersonal) ? saved.archivedPersonal : [];
+    state.hintDismissedDay = saved.hintDismissedDay || null;
 
     // 0 屏提问（§11）：默认四级，直接开背；首屏不问任何东西
     const coll = state.settings.collections?.[0] || 'cet4';
@@ -34120,6 +34212,14 @@ function createApp(ports = {}) {
     state.offline = res.offline;
     state.banner = res.banner;
     state.librarySource = res.source;
+
+    // 启动时也归档一次「已收服」的生词本词条。
+    //
+    // 为什么启动时也要做：判定依据里有**时间**（记忆强度随天数衰减，
+    // isConquered 看的是此刻的强度）。用户昨天答对、今天强度够 0.9 了，
+    // 如果只在答题那一刻检查，这一批就要等到他下次答题才会被发现。
+    // 放在 init 里、且 emit 在它之后，界面第一次画出来就是归档后的状态。
+    archiveConqueredPersonal();
 
     // 崩溃恢复：存在未结算的 sessionId → 恢复队列顺序与剩余词，已答过的不重考（§7.2）
     const snap = await storage.get('session');
@@ -34234,6 +34334,14 @@ function createApp(ports = {}) {
       aiMode: s.aiMode || 'ondemand', // off | ondemand | all
       masterEnabled: s.masterEnabled !== false, // AI 增强总开关（默认开）
       roundSize: s.roundSize || 5, // 碎片冲刺 3/5/10
+      /*
+       * 「再来几个新词」一次加多少（2026-10-12 新增）。
+       *
+       * 用户在设置页找不到这个 —— 因为以前它根本不存在：界面上写死了
+       * `app.extendRound(5)`，想改只能改代码。现在变成可设项，默认仍是 5
+       * （和以前的行为一致，老用户升上来不会突然变样）。
+       */
+      extendBatch: s.extendBatch || 5,
       paused: s.paused || null,
       vacationUntil: s.vacationUntil || null,
       dismissedProposals: s.dismissedProposals || {},
@@ -34330,8 +34438,16 @@ function createApp(ports = {}) {
    * **只建设 step 个**。排除发生在池子源头（见 queue.mjs 的 skip），
    * 所以学过的词不会从复习池绕回来；再叠一层严格上限，凑不满就凑不满。
    */
-  function extendRound(batch = 5) {
-    const step = Math.max(1, Math.min(20, Math.round(batch) || 5));
+  /**
+   * 「再来 N 个新词」——本轮再多排 N 个**没排过**的词，接在正在背的这一轮后面。
+   *
+   * N 的来路（2026-10-12 起）：优先用显式传入的 batch（测试和内部调用用），
+   * 没传就读用户在设置页选的 `settings.extendBatch`。以前界面上写死 5，
+   * 用户找不到地方改 —— 现在改成可设项。
+   */
+  function extendRound(batch = null) {
+    const want = batch ?? state.settings?.extendBatch ?? 5;
+    const step = Math.max(1, Math.min(20, Math.round(want) || 5));
     const key = state.dayKey || Q.dayKey(now());
 
     const prev = Array.isArray(state.roundItems) ? state.roundItems : [];
@@ -34642,6 +34758,9 @@ function createApp(ports = {}) {
     }
     writeRecord({ mode: 'quiz', rating: res.correct ? S.RATING.KNOWN : S.RATING.FORGOT, correct: res.correct, card, extra: { chosen: res.chosen?.id } });
     persist();
+    // 答对之后才可能「收服」——所以在这里检查一次自动归档，紧接着再 emit，
+    // 界面刷新时看到的就是「已经移走」之后的状态（不会先画出来再消失一下）。
+    archiveConqueredPersonal();
     emit();
     return res;
   }
@@ -34958,17 +35077,38 @@ function createApp(ports = {}) {
   // ── 生词本（§10）──
   function addPersonal(word, { context = null, source = null } = {}) {
     const id = word.id || `personal:${String(word.word).toLowerCase()}`;
-    const entry = {
-      id,
-      word: word.word,
+    /*
+     * 收录时**自动补释义**。
+     *
+     * 之前这里是照抄调用方给的内容，而唯一的调用点传的是 `meaning: ''`
+     * —— 于是生词本里永远显示「（还没释义）」。可内置 6 个词库（29,841 词）
+     * 本来就带音标和释义，只是从来没人去查过。
+     *
+     * 顺序：**调用方明确给了就用给的**（以后悬浮条可能会带上上下文里的释义），
+     * 只有缺了才去词库查。查得到就把音标/词性/释义一起补上；查不到才留空，
+     * 由界面显示「（还没释义）」并给出手填入口。
+     *
+     * `lookupWord` 读的是打包进产物的种子数据，所以这里是同步、离线、零等待的。
+     */
+    const given = {
       ipa: word.ipa || '',
       pos: word.pos || '',
       meaning: word.meaning || '',
+    };
+    const hit = given.meaning ? null : L.lookupWord(word.word, word.collection || null);
+    const entry = {
+      id,
+      word: word.word,
+      ipa: given.ipa || (hit ? hit.ipa : ''),
+      pos: given.pos || (hit ? hit.pos : ''),
+      meaning: given.meaning || (hit ? hit.meaning : ''),
       example: context || word.example || null,
       collection: 'personal',
       personal: true,
       addedTs: now(),
       source,
+      // 释义哪来的：'manual' 人填的 / 'lookup' 词库查到的 / '' 还没有
+      meaningSource: given.meaning ? 'manual' : (hit ? 'lookup' : ''),
       seq: 100000 + state.personal.length,
     };
     state.personal = [...state.personal.filter((p) => p.id !== id), entry];
@@ -34978,10 +35118,122 @@ function createApp(ports = {}) {
     emit();
     return entry;
   }
+
+  /**
+   * 手动给生词本里的某个词补/改释义（界面上那个手填入口）。
+   *
+   * 为什么要有：查词库查不到的（人名、缩写、生僻词、词组）总得有个出口。
+   * 之前那一行**完全没有编辑入口**，用户只能删掉重来 —— 而重来还是空的。
+   */
+  function setPersonalMeaning(id, meaning) {
+    const text = String(meaning ?? '').trim();
+    const cur = (state.personal || []).find((p) => p.id === id);
+    if (!cur) return null;
+    const next = { ...cur, meaning: text, meaningSource: text ? 'manual' : '' };
+    state.personal = state.personal.map((p) => (p.id === id ? next : p));
+    state.words = mergePersonal(state.words, [next]);
+    persist();
+    emit();
+    return next;
+  }
+
   function removePersonal(id) {
     state.personal = state.personal.filter((p) => p.id !== id);
     persist();
     emit();
+  }
+
+  /**
+   * 「今天没记住的几个词」—— 生词本页那条提示的数据源。
+   *
+   * 用户的实测反馈：「我今天背的不熟的也会加进去」。他原话里没说多不熟算不熟，
+   * 所以我选了**最容易被用户预判**的口径 —— **今天答错过的词**。
+   * 没用「记忆强度低于某阈值」那种口径：用户没法从界面上知道一个词现在强度
+   * 是多少，那样弹出来的提示会显得无缘无故。
+   *
+   * 已经在生词本里的词不重复提示（用户已经认可过了）。
+   * 返回的是**词对象数组**，因为界面要显示单词和释义。
+   */
+  function unfamiliarToday() {
+    const seen = new Set();
+    const out = [];
+    const inPersonal = new Set((state.personal || []).map((p) => p.id));
+    // 这个函数**每次快照渲染都会跑一遍**（界面读 st.unfamiliarCount），
+    // 所以按 id 建一次 Map 再查，别对每个候选做一遍 O(n) 的 find ——
+    // 词表 7000 词 × 今天 200 条记录那个量级下是 140 万次比较，白卡一帧。
+    const byId = new Map();
+    for (const w of state.words || []) if (w && w.id) byId.set(w.id, w);
+    for (const it of state.container?.items || []) {
+      if (it && it.word && it.word.id && !byId.has(it.word.id)) byId.set(it.word.id, it.word);
+    }
+    for (const r of state.records || []) {
+      if (r.dayKey !== state.dayKey) continue;   // 只看今天
+      if (!r.incorrect) continue;                // 只看答错的
+      const wid = r.wordId;
+      if (!wid || seen.has(wid) || inPersonal.has(wid)) continue;
+      seen.add(wid);
+      const w = byId.get(wid);
+      if (w) out.push(w);
+    }
+    return out;
+  }
+
+  /** 把「今天没记住的几个词」一次性收进生词本（用户点了提示上的按钮）。 */
+  function addUnfamiliarToday() {
+    const list = unfamiliarToday();
+    if (!list.length) return 0;
+    for (const w of list) addPersonal(w, { source: '今日没记住' });
+    return list.length;
+  }
+
+  /** 用户点了提示上的「先不用」：今天不再提示（存盘，重开也不再弹）。 */
+  function dismissUnfamiliarHint() {
+    state.hintDismissedDay = state.dayKey;
+    persist();
+    emit();
+  }
+
+  /** 今天这条提示是否已经被用户「先不用」掉了（跨天自动恢复）。 */
+  function dismissHintToday() {
+    return state.hintDismissedDay === state.dayKey;
+  }
+
+  /**
+   * 已收服的生词本词条 → 自动从**列表**里移走，同时留一条档案。
+   *
+   * 用户的要求：「真正确定收服就可以自动删」+「留记录」。
+   *
+   * 三条安全边界（这是会动数据的地方，必须写清楚）：
+   *   1. **只动 `state.personal` 这一个列表。** 不碰 `mem`（记忆强度/稳定性）、
+   *      不碰 `records`（答题记录）、不碰 `confusions`。判定哪怕算错，
+   *      代价也只是一行从列表里挪走。
+   *   2. `state.words` 每次 init 都由「词库 + state.personal」重建，
+   *      所以挪走**不丢词** —— 词还在词库里，下次忘了照样能排进队列。
+   *   3. 档案只存最小信息（词、id、时间、原词库）。词目能按 id 查回来
+   *      （`L.lookupWord`），不重复存一份，省体积。
+   *
+   * 判定用的既有硬标准：`M.isConquered` = 强度 ≥ 0.9 **且**在辨词里答对过。
+   *
+   * @returns {number} 本次移走几条
+   */
+  function archiveConqueredPersonal() {
+    const list = state.personal || [];
+    if (!list.length) return 0;
+    const t = now();
+    const gone = list.filter((p) => {
+      const m = state.mem?.[p.id];
+      return !!m && M.isConquered(m, t);
+    });
+    if (!gone.length) return 0;
+    const goneIds = new Set(gone.map((p) => p.id));
+    state.personal = list.filter((p) => !goneIds.has(p.id));
+    state.archivedPersonal = [
+      ...(state.archivedPersonal || []),
+      ...gone.map((p) => ({ id: p.id, word: p.word, ts: t, collection: p.collection || null })),
+    ];
+    persist();
+    emit();
+    return gone.length;
   }
 
   // ── 情绪胶囊（§3）──
@@ -35046,6 +35298,9 @@ function createApp(ports = {}) {
       exp: state.exp,
       pause: state.pause,
       history: state.history,
+      // 已收服档案 / 提示忽略日期 —— 少写一个就等于每次重开都丢。
+      archivedPersonal: state.archivedPersonal,
+      hintDismissedDay: state.hintDismissedDay,
     });
     if (state.session) storage.set('session', S.snapshot(state.session));
   }
@@ -35074,6 +35329,11 @@ function createApp(ports = {}) {
     setVacation,
     addPersonal,
     removePersonal,
+    setPersonalMeaning,
+    unfamiliarToday,
+    addUnfamiliarToday,
+    dismissUnfamiliarHint,
+    archiveConqueredPersonal,
     acceptProposal,
     dismissProposal,
     beckon,
@@ -35151,7 +35411,7 @@ const M = { DEFAULT_THETA, DAY_MS, newMemory, features, halfLifeDays, recallProb
 const MK = { errorDelta, applyError, pairKey, noteConfusion, flagConfusion, pairsNeedingDrill, activePairs, blacklistedPartners, similarity, ERROR_KIND, classifyError, diagnosis, pickDistractors };
 const SEED = { SEED_CET4_RAW: SEED_CET4_RAW, SEED_COLLECTIONS: SEED_COLLECTIONS };
 const SEEDX = { SEED_CET6, SEED_KAOYAN, SEED_TOEFL, SEED_GRE, SEED_IELTS, SEED_EXAM_COUNTS };
-const L = { COLLECTIONS, SOURCES, FIRST_CHUNK, parseWordlist, loadCollection, seedFor, seedMemories, extractWordsFromText, isPureEnglish, contextSentence, SEED_CET4 };
+const L = { COLLECTIONS, SOURCES, FIRST_CHUNK, parseWordlist, loadCollection, seedFor, seedMemories, extractWordsFromText, isPureEnglish, contextSentence, lookupWord, SEED_CET4 };
 const SP = { speechAvailable, speak, stopSpeaking, speechSupportedLanguages };
 const HK = { HOOK_SOURCE, HOOK_MAX_CHARS, buildHook, buildHooks, createHookCache };
 const Q = { DAY_START_HOUR, dayKey, dayStartTs, daysBetweenKeys, priorDayKey, containerSize, comebackCopy, buildDailyContainer, explain, badgesFor, emptyState, CHECKIN_RATIO, isCheckedIn, bumpStreak, isPaused, effectiveBaseN, TIER, seededRandom, seededShuffle, shouldBlockNew };
@@ -35783,7 +36043,25 @@ function renderVocab(root, st, app) {
           st.personal.map((p) =>
             el('div', { class: 'vs-row' }, [
               el('span', { class: 'w', text: p.word }),
+              // 词性 + 音标：`addPersonal` 现在会自动从内置词库补（离线查词），
+              // 以前这两栏**永远是空的** —— 因为唯一的收录入口传的是空释义。
+              p.pos || p.ipa
+                ? el('span', { class: 'vs-sub', style: { margin: '0 6px', whiteSpace: 'nowrap' } },
+                    `${p.pos || ''}${p.pos && p.ipa ? ' ' : ''}${p.ipa || ''}`)
+                : null,
               el('span', { class: 'm', text: p.meaning || '（还没释义）' }),
+              // 查不到的词（人名、缩写、生僻词、词组）得有个出口。
+              // 以前这一行**完全没有编辑入口**，用户只能删掉重来 —— 而重来还是空的。
+              el('input', {
+                class: 'vs-input',
+                style: { width: '92px', marginLeft: '6px' },
+                placeholder: '补释义',
+                value: p.meaning || '',
+                id: `vs-mean-${p.id}`,
+                onchange: (ev) => {
+                  app.setPersonalMeaning(p.id, ev.target.value);
+                },
+              }),
               el(
                 'button',
                 {
@@ -35798,6 +36076,41 @@ function renderVocab(root, st, app) {
           ),
         )
       : el('div', { class: 'vs-empty', text: '生词本还是空的' }),
+
+    /*
+     * 「今天没记住的几个词」提示（2026-10-12 新增）。
+     *
+     * 用户的实测反馈：「我今天背的不熟的也会加进去」。他不想要自动塞 ——
+     * 选的是**给提示**：生词本始终是他自己认可的词，但不用他自己去回想今天错了哪几个。
+     *
+     * 口径：今天答错过的词（`app.unfamiliarToday`）。已经在生词本里的不重复提示。
+     * 点「先不用」存盘，当天不再弹；跨天自动恢复。
+     */
+    st.unfamiliarCount
+      ? el('div', { class: 'vs-gate', style: { marginTop: '10px' } }, [
+          el('div', { class: 'vs-gate-note', text: `今天有 ${st.unfamiliarCount} 个词没记住，要加进生词本吗？` }),
+          el('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' } }, [
+            el('button', {
+              class: 'vs-btn primary',
+              onclick: () => app.addUnfamiliarToday(),
+            }, `加进来（${st.unfamiliarCount} 个）`),
+            el('button', {
+              class: 'vs-btn muted',
+              onclick: () => app.dismissUnfamiliarHint(),
+            }, '先不用'),
+          ]),
+        ])
+      : null,
+
+    // 「已收服 N 词」——用户选了「自动删但留记录」，那记录总得**看得见**，
+    // 否则「自动删」在他眼里就等于"词莫名消失了"。
+    st.archivedPersonal && st.archivedPersonal.length
+      ? el('div', {
+          class: 'vs-sub',
+          style: { marginTop: '8px' },
+          text: `已收服 ${st.archivedPersonal.length} 个（不再出现在上面列表里，学习记录仍在）`,
+        })
+      : null,
 
     el('div', { class: 'vs-h2', text: '批量导入' }),
     el('div', { class: 'vs-sub', text: '粘贴一段英文，自动切词收录。' }),
@@ -35900,10 +36213,21 @@ function renderSettings(root, st, app) {
       el('div', { class: 'preview', id: 'vs-bal-preview', text: preview }),
     ]),
 
+    // 这里原来标签写的是「碎片冲刺」—— 那是规格 §5.1 里的**设计概念名**
+    // （原意："用零碎时间背一小轮，答完即结算、不设倒计时"；限时闯关那一版
+    // 已经被砍了）。用户看到这个标签直接问「碎片冲刺是什么」，因为标签是黑话、
+    // 下面的下拉框才是实话。现在标签写实话，黑话挪进小字注解。
     el('div', { class: 'vs-h2', text: '一轮几个词' }),
     el('div', { class: 'vs-field' }, [
-      el('label', {}, ['碎片冲刺', el('span', { class: 'note', text: '答完即结算，不设倒计时' })]),
+      el('label', {}, ['背完一轮要答对几个词', el('span', { class: 'note', text: '答完即结算，不设倒计时（碎片冲刺）' })]),
       select([3, 5, 10], s.roundSize, (v) => app.updateSettings({ roundSize: v })),
+    ]),
+
+    // 「再来几个新词」一次加多少。以前界面上写死 `app.extendRound(5)`，
+    // 用户找不到地方改（他的原话：「再来几个这个数量的设置似乎没有」）。
+    el('div', { class: 'vs-field' }, [
+      el('label', {}, ['点「再来几个」时加几个', el('span', { class: 'note', text: '接在正在背的这一轮后面' })]),
+      select([3, 5, 10], s.extendBatch, (v) => app.updateSettings({ extendBatch: v })),
     ]),
 
     el('div', { class: 'vs-h2', text: '词库' }),
@@ -36395,7 +36719,7 @@ function createPanel(app, ctx = {}) {
             ? el('div', { style: { textAlign: 'center' } },
                 el('button', { class: 'vs-btn primary', onclick: () => app.restartRound() }, '再背一轮'))
             : null,
-          // ② 自己往后背：突破当天计划，每次 +5
+          // ② 自己往后背：突破当天计划，每次加的数量由**设置页决定**（原来写死 5）。
           //
           // 闸门关着时**不给这个按钮**。实测过：闸门一关，新词池就被挡住，
           // extendRound 会把容器从 20 扩到 25，但新增词数是 0 —— 按钮点下去
@@ -36403,7 +36727,12 @@ function createPanel(app, ctx = {}) {
           // 直接不显示它，只留下真正有效的那条路（「我还是想继续」）。
           !gate.closed
             ? el('div', { style: { textAlign: 'center' } },
-                el('button', { class: 'vs-btn', onclick: () => app.extendRound(5) }, '再来 5 个新词'))
+                el(
+                  'button',
+                  { class: 'vs-btn', onclick: () => app.extendRound() },
+                  // 按钮上的数字跟着设置走，不然用户改了设置、按钮还写 5，会以为没生效。
+                  `再来 ${st.settings?.extendBatch || 5} 个新词`
+                ))
             : null,
           // ③ 安全阀关着时，把门交给用户自己开
           gate.closed

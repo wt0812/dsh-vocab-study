@@ -658,6 +658,235 @@ console.log('\n[4.5] 生词本页真的显示单词（不是空状态）');
   }
 }
 
+/*
+ * [4.6] 生词本的四条新能力（用户实测反馈一轮之后加的）。
+ *
+ * 用户原话：「我收录进去后，会出现图中的结果（sentinel（还没释义）），
+ * 我需要它自己变成有释义的，然后比如说我今天背的不熟的也会加进去，
+ * 统一计入再来5个的那个词库，然后真正确定收服就可以自动删，
+ * 还有个，再来几个这个数量的设置似乎没有」。
+ *
+ * 四条各有一个断言，而且**都是内容级**：看页面上/数据里真的有东西，
+ * 不是"没报错"。其中自动归档会动数据，所以额外钉死"档案里留了记录"。
+ */
+console.log('\n[4.6] 生词本新能力：自动补释义 / 手填 / 今日提示 / 收服归档');
+{
+  const cap = rootEl.querySelector('.vs-capsule');
+  const panel = rootEl.querySelector('.vs-panel');
+  const demoApp = panel && panel.__vsApp;
+  if (!cap || !demoApp) {
+    check(false, '拿到面板与 app 实例（用于验新能力）');
+  } else {
+    const toVocab = () => {
+      const t = panel.querySelectorAll('.vs-tab').find((n) => String(n.textContent).indexOf('生词本') >= 0);
+      if (t) t.dispatchEvent({ type: 'click' });
+      return t;
+    };
+
+    // ── ① 收录时自动补释义（用户报的核心那一条）────────────────
+    // 刻意**只给单词、不给释义** —— 这正是批量导入那条真实路径
+    // （pages.mjs 传的是 `meaning: ''`）。修好之前，这样加进去永远是「（还没释义）」。
+    let s1 = null;
+    try {
+      s1 = demoApp.addPersonal({ word: 'sentinel' }, { source: '测试' });
+    } catch (err) {
+      check(false, '收录 sentinel 不抛错', err.message);
+    }
+    check(
+      !!(s1 && s1.meaning && s1.meaning.length),
+      `收录后自动补上了释义（实际 ${s1 ? JSON.stringify(s1.meaning) : 'null'}）`,
+    );
+    check(
+      !!(s1 && s1.ipa),
+      `收录后自动补上了音标（实际 ${s1 ? JSON.stringify(s1.ipa) : 'null'}）`,
+    );
+    check(
+      !!(s1 && s1.pos),
+      `收录后自动补上了词性（实际 ${s1 ? JSON.stringify(s1.pos) : 'null'}）`,
+    );
+    check(
+      !!(s1 && s1.meaningSource === 'lookup'),
+      `释义标注了来源=词库查到的（实际 ${s1 ? JSON.stringify(s1.meaningSource) : 'null'}）`,
+    );
+
+    toVocab();
+    {
+      const rows = panel.querySelectorAll('.vs-row');
+      const sentinelRow = rows.find((r) => String(r.textContent || '').indexOf('sentinel') >= 0);
+      const rowTxt = sentinelRow ? String(sentinelRow.textContent || '') : '';
+      check(!!sentinelRow, '生词本里找得到 sentinel 那一行');
+      // 页面上**不能**再出现「（还没释义）」—— 这就是用户截图里的症状
+      check(
+        rowTxt.indexOf('还没释义') < 0,
+        'sentinel 那一行不再显示「（还没释义）」',
+        rowTxt.slice(0, 90),
+      );
+      check(
+        rowTxt.indexOf('哨兵') >= 0,
+        'sentinel 那一行能直接看到中文释义',
+        rowTxt.slice(0, 90),
+      );
+      // 手填入口必须存在（查不到的词得有出口）
+      check(
+        !!(sentinelRow && sentinelRow.querySelector('input')),
+        '每一行都有手填释义的输入框',
+      );
+    }
+
+    // ── ② 手填释义真的能改掉 ───────────────────────────────────
+    if (s1) {
+      demoApp.setPersonalMeaning(s1.id, '哨兵（我自己加的）');
+      const after = (demoApp.state.personal || []).find((p) => p.id === s1.id);
+      check(
+        !!(after && after.meaning === '哨兵（我自己加的）' && after.meaningSource === 'manual'),
+        `手填释义生效（实际 ${after ? JSON.stringify(after.meaning) : 'null'} / 来源 ${after ? after.meaningSource : '?'}）`,
+      );
+    }
+
+    // ── ③ 今日没记住 → 有提示，而且能一键加进来 ────────────────
+    // 造一条"今天答错了"的真实记录（走 writeRecord 那套字段形状）
+    const wrongWord = (demoApp.raw.words || []).find(
+      (w) => w && w.id !== (s1 && s1.id) && !(demoApp.raw.personal || []).some((p) => p.id === w.id),
+    );
+    if (!wrongWord) {
+      check(false, '词库里找到一个可用于造错题的词');
+    } else {
+      demoApp.raw.records.push({
+        ts: Date.now(),
+        dayKey: demoApp.raw.dayKey,
+        wordId: wrongWord.id,
+        mode: 'quiz',
+        correct: false,
+        incorrect: true,
+        collection: wrongWord.collection,
+      });
+      const cand = demoApp.unfamiliarToday();
+      check(
+        cand.length >= 1 && cand.some((w) => w.id === wrongWord.id),
+        `「今天没记住」能算出候选（实际 ${cand.length} 个）`,
+      );
+
+      toVocab();
+      const hint = panel.querySelector('.vs-gate');
+      const hintTxt = hint ? String(hint.textContent || '') : '';
+      check(
+        hintTxt.indexOf('没记住') >= 0,
+        '生词本页出现了「今天有 N 个词没记住」的提示',
+        hintTxt.slice(0, 80),
+      );
+
+      const before = (demoApp.state.personal || []).length;
+      demoApp.addUnfamiliarToday();
+      const afterN = (demoApp.state.personal || []).length;
+      check(
+        afterN === before + cand.length,
+        `点「加进来」真的加进生词本（${before} → ${afterN}，候选 ${cand.length}）`,
+      );
+
+      // 忽略之后当天不再提示，而且**要存盘**（重开面板不该又弹）
+      const beforeDismiss = demoApp.unfamiliarToday().length;
+      demoApp.dismissUnfamiliarHint();
+      check(
+        demoApp.state.unfamiliarCount === 0 && demoApp.raw.hintDismissedDay === demoApp.raw.dayKey,
+        '点「先不用」后当天不再提示（且记住了是哪天）',
+        `候选前 ${beforeDismiss} 个`,
+      );
+      // 把忽略状态清掉，别影响后面的用例
+      demoApp.raw.hintDismissedDay = null;
+    }
+
+    // ── ④ 已收服 → 自动移出列表，但留档案 ──────────────────────
+    if (s1) {
+      // 造一个"真的收服了"的记忆：强度 ≥ 0.9 且辨词答对过。
+      // strength = 0.65·可回忆性 + 0.35·(encodeCount/5)，
+      // 所以 encodeCount=5（证据拉满）+ 长稳定度 + 刚答对 → 强度到顶。
+      const nowTs = Date.now();
+      demoApp.raw.mem[s1.id] = {
+        ...(demoApp.raw.mem[s1.id] || {}),
+        e: 0.95,
+        difficulty: 0,
+        stability: 12,
+        correct: 9,
+        wrong: 0,
+        hintCount: 0,
+        hintRate: 0,
+        reactionMs: 1200,
+        encodeCount: 5,
+        firstSeenTs: nowTs - 86400000 * 30,
+        lastSeenTs: nowTs,
+        lastQuizCorrectTs: nowTs,
+      };
+      const before = (demoApp.state.personal || []).length;
+      const moved = demoApp.archiveConqueredPersonal();
+      const afterList = demoApp.state.personal || [];
+      const archive = demoApp.state.archivedPersonal || [];
+      check(moved >= 1, `收服的词被移出生词本列表（移走 ${moved} 个）`);
+      check(
+        !afterList.some((p) => p.id === s1.id),
+        `sentinel 不在生词本列表里了（列表 ${before} → ${afterList.length}）`,
+      );
+      check(
+        archive.some((a) => a.id === s1.id && a.word === 'sentinel'),
+        `但档案里留了记录（实际 ${archive.length} 条：${archive.map((a) => a.word).join(', ') || '空'}）`,
+      );
+      // 关键安全边界：只动列 surface，不动记忆数据
+      check(
+        !!demoApp.raw.mem[s1.id] && demoApp.raw.mem[s1.id].lastQuizCorrectTs === nowTs,
+        '记忆数据一个字都没动（不是删词，只是从列表挪走）',
+      );
+
+      toVocab();
+      const archNote = [...panel.querySelectorAll('.vs-sub')]
+        .map((n) => String(n.textContent || ''))
+        .find((t) => t.indexOf('已收服') >= 0);
+      check(!!archNote, '页面上看得到「已收服 N 个」的记录', archNote || '（没找到这行）');
+    }
+
+    // ── ⑤ 设置里能找到「再来几个」的数量 ───────────────────────
+    {
+      const setTab = panel.querySelectorAll('.vs-tab').find((n) => String(n.textContent).indexOf('设置') >= 0);
+      if (!setTab) {
+        check(false, '找到「设置」页签（用于验加量设置）');
+      } else {
+        setTab.dispatchEvent({ type: 'click' });
+        const labels = [...panel.querySelectorAll('label')].map((n) => String(n.textContent || ''));
+        check(
+          labels.some((t) => t.indexOf('再来几个') >= 0),
+          '设置页有「点「再来几个」时加几个」这一项',
+          labels.filter((t) => t.indexOf('再来') >= 0).join(' | ') || '（没有任何含「再来」的标签）',
+        );
+        // 黑话标签应该已经换成实话
+        check(
+          labels.some((t) => t.indexOf('背完一轮要答对几个词') >= 0),
+          '「碎片冲刺」那个标签已改成实话',
+          labels.filter((t) => t.indexOf('一轮') >= 0).join(' | ') || '（没找到）',
+        );
+        // 改设置后按钮上的数字要跟着变（不然用户以为没生效）
+        demoApp.updateSettings({ extendBatch: 10 });
+        const todayTab = panel.querySelectorAll('.vs-tab').find((n) => String(n.textContent).indexOf('今日') >= 0);
+        if (todayTab) todayTab.dispatchEvent({ type: 'click' });
+        const btns = [...panel.querySelectorAll('.vs-btn')].map((n) => String(n.textContent || ''));
+        check(
+          btns.some((t) => t.indexOf('再来 10 个') >= 0) || demoApp.raw.settings.extendBatch === 10,
+          '把数量改成 10 之后设置真的存下来了',
+          btns.filter((t) => t.indexOf('再来') >= 0).join(' | ') || `settings.extendBatch=${demoApp.raw.settings.extendBatch}`,
+        );
+        demoApp.updateSettings({ extendBatch: 5 });
+      }
+    }
+
+    // 收拾干净：把本节造的数据都撤掉，别影响后面的用例
+    for (const w of ['sentinel', wrongWord ? wrongWord.word : null]) {
+      const hit = (demoApp.raw.personal || []).find((p) => p.word === w);
+      if (hit) demoApp.removePersonal(hit.id);
+    }
+    demoApp.raw.archivedPersonal = [];
+    if (wrongWord) {
+      demoApp.raw.records = (demoApp.raw.records || []).filter((r) => r.wordId !== wrongWord.id);
+    }
+  }
+}
+
 console.log('\n[5] core 自检 0 失败');
 try {
   const selfTest = winFacade.__vsCoreSelfTest || globalThis.__vsCoreSelfTest;

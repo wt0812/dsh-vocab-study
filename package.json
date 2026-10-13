@@ -1,6 +1,6 @@
 {
   "name": "dsh-vocab-study",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "今日词汇 (Vocabulary Study) —— DSH 的背单词面板：一个胶囊 + 一个标签页，按记忆半衰期排期，离线可用，不催不指责。",
   "repository": {
     "type": "git",

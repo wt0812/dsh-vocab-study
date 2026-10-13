@@ -478,6 +478,129 @@ if (fail === 0) {
     })(),
   ]);
 
+  /**
+   * 查词函数（`lookupWord`）的**行为**测试。
+   *
+   * 为什么必须有：用户报「收录进去后显示（还没释义），我需要它自己变成有释义的」。
+   * 修法是接上内置词库这条线（6 库 29,841 词，本来就带音标和释义，从来没人查）。
+   * 所以这里断言的是"真的查得到"，不是"函数存在"。
+   *
+   * 反向验证做过：把 lookupWord 改成恒返回 null，这条会红。
+   */
+  extras.push([
+    '收词时能从内置词库查到音标 + 词性 + 释义（离线）',
+    (() => {
+      const hit = L.lookupWord('sentinel');
+      // 词干本身对不上就是功能没接上
+      if (!hit || String(hit.word).toLowerCase() !== 'sentinel') {
+        console.log('      ↑ sentinel 没查到（lookupWord 返回 ' + JSON.stringify(hit) + '）');
+        return false;
+      }
+      // 三样都得有：音标、词性、释义。少一样用户看到的还是"半条词目"。
+      const gaps = ['ipa', 'pos', 'meaning'].filter((k) => !hit[k]);
+      if (gaps.length) {
+        console.log(`      ↑ 查到了但缺: ${gaps.join(', ')}（得到 ${JSON.stringify(hit)}）`);
+        return false;
+      }
+      if (hit.meaning.includes('还没释义')) {
+        console.log('      ↑ 释义是占位文案，等于没查到');
+        return false;
+      }
+      // 大小写不敏感（用户划词可能首字母大写）
+      const upper = L.lookupWord('Sentinel');
+      if (!upper || upper.id !== hit.id) {
+        console.log('      ↑ 大小写不敏感这条不成立');
+        return false;
+      }
+      // 查不到的必须老实返回 null（不能编一个出来）
+      if (L.lookupWord('zzzznonexistentzzz') !== null) {
+        console.log('      ↑ 查不到的词居然返回了东西 —— 这就是编造释义');
+        return false;
+      }
+      console.log(`      sentinel → ${hit.pos} ${hit.meaning.slice(0, 24)}… [${hit.collection}]`);
+      return true;
+    })(),
+  ]);
+
+  /**
+   * 结构性断言：两个方向的登记一致性，都是为了防"整包白屏"。
+   *
+   * (a) `library.mjs` 里**导出的每个符号**都得登记在**两份**构建脚本的
+   *     CORE_EXPORTS 里。漏一个 → 摊平后那个名字不存在。
+   * (b) `app.mjs` 里用到的每个 `L.xxx` 也得登记。漏一个 → 悬空命名空间前缀。
+   *
+   * 为什么要这条：我这次加 `lookupWord` 就漏登记了，`tools/build-plugin.py`
+   * 直接拒绝构建（"产物里残留悬空命名空间前缀"）—— 那个检测本身很好，
+   * 但(1)它只在**跑构建时**才报警，(2)`tools/build.py` 当时**没报**，
+   * 于是那次我看到的产物是旧的、还差点当成构建成功。两份清单必须同步，
+   * 这是这个项目反复踩的坑。这条断言把它变成单测必过项，构建之前就拦住。
+   *
+   * ⚠️ 写这条时踩的坑（记下来，同一个教训我栽过两次了）：
+   * 第一版写了一行"解析失败就别假装通过"的守卫，条件是 `used.size < 5`，
+   * 而 app.mjs 其实只用到 4 个 `L.*` —— 于是断言**每次都走 return false**，
+   * 连它自己那行诊断都不打印。看起来是一条红着的断言，实际是断言写坏了。
+   * 现在改法：(1) 阈值放宽到真实最小值，(2) 凡是提前 return 都先打印原因。
+   */
+  extras.push([
+    'library.mjs 的导出 + app.mjs 用到的 L.* 都登记在两份构建脚本里（不会白屏）',
+    (() => {
+      const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+      // library.mjs 顶层 export 的符号名（function/const/class，含 export {...} 列表）
+      const lib = strip(readFileSync(new URL('../core/library.mjs', import.meta.url), 'utf8'));
+      const exported = new Set();
+      for (const m of lib.matchAll(/^export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) {
+        exported.add(m[1]);
+      }
+      for (const m of lib.matchAll(/^export\s*\{([^}]*)\}/gm)) {
+        for (const part of m[1].split(',')) {
+          const name = part.trim().split(/\s+as\s+/).pop().trim();
+          if (name) exported.add(name);
+        }
+      }
+
+      const app = strip(readFileSync(new URL('../core/app.mjs', import.meta.url), 'utf8'));
+      const used = new Set();
+      for (const m of app.matchAll(/(?<![\w$.])L\.([A-Za-z_$][\w$]*)/g)) used.add(m[1]);
+
+      if (exported.size < 8 || used.size < 3) {
+        console.log(`      ↑ 解析失败：library 导出 ${exported.size} 个、app 用到 L.* ${used.size} 个（都不该这么少）`);
+        return false;
+      }
+
+      const problems = [];
+      for (const f of ['build.py', 'build-plugin.py']) {
+        const src = readFileSync(new URL(`../tools/${f}`, import.meta.url), 'utf8');
+        const i = src.indexOf('CORE_EXPORTS');
+        if (i < 0) { problems.push(`${f}: 找不到 CORE_EXPORTS`); continue; }
+        const seg = src.slice(i);
+        // build.py 写 `"L": [...]`，build-plugin.py 写 `("L", [...])`，两种都认。
+        const j = seg.search(/"L"\s*:\s*\[|\(\s*"L"\s*,\s*\[/);
+        if (j < 0) { problems.push(`${f}: 找不到 L 的清单`); continue; }
+        const k = seg.indexOf('[', j);
+        let depth = 0; let end = -1;
+        for (let p = k; p < seg.length; p++) {
+          if (seg[p] === '[') depth++;
+          else if (seg[p] === ']') { depth--; if (depth === 0) { end = p; break; } }
+        }
+        const listed = new Set([...(end < 0 ? '' : seg.slice(k + 1, end)).matchAll(/"([A-Za-z_$][\w$]*)"/g)].map((m) => m[1]));
+        if (listed.size < 8) { problems.push(`${f}: L 清单只解析出 ${listed.size} 个（解析失败?）`); continue; }
+        // (a) library.mjs 导出的都登记了吗
+        for (const name of exported) if (!listed.has(name)) problems.push(`${f} 缺 library 导出「${name}」`);
+        // (b) app.mjs 用到的都登记了吗
+        for (const name of used) if (!listed.has(name)) problems.push(`${f} 缺 app 用到的「${name}」`);
+      }
+
+      if (problems.length) {
+        // 两个方向、两个文件都要说清楚，否则拿到报错也不知道该改哪个
+        console.log(`      ↑ ${problems.join('; ')}`);
+        return false;
+      }
+      console.log(`      library 导出 ${exported.size} 个 / app 用到 ${used.size} 个，两份清单都齐`);
+      return true;
+    })(),
+  ]);
+
   console.log('\n健全性附加检查：');
   let extraFail = 0;
   for (const [name, ok] of extras) {

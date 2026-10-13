@@ -266,6 +266,76 @@ export function seedFor(collection = 'cet4') {
   );
 }
 
+/**
+ * 按单词拼写查内置词库，拿到音标 / 词性 / 释义。
+ *
+ * 为什么要有它：用户在对话里划一个词加进生词本、或者批量粘贴一整段英文
+ * 收录进来的词，**本来就没带释义** —— 收的时候给的是 `meaning: ''`，
+ * 于是生词本里永远显示「（还没释义）」。而内置的 6 个词库（29,841 词）
+ * 里本来就带着音标和释义，只是从来没人去查。
+ *
+ * 关键点：`seedFor()` 读的是打包进产物的种子数据，所以这个查询是
+ * **同步、纯离线、零网络**的 —— 不需要等 `init()`，也不需要 await。
+ *
+ * 查询范围：6 个词库全查（cet4 → cet6 → kaoyan → ielts → toefl → gre 的键序），
+ * 一个词在多个考纲里都出现时**按这个顺序取第一次命中**，结果稳定。
+ * 找不到就返回 null，调用方负责显示「（还没释义）」并给手填入口。
+ *
+ * @param {string} word 单词拼写（大小写不敏感，忽略首尾空白）
+ * @param {string} [preferCollection] **当前未使用**，保留参数是为了调用方签名稳定。
+ *   （曾经想做"优先用当前词库的释义"，但那样同一个词的释义会因为用户在背哪本
+ *   而变，生词本里的释义会自己跳变 —— 明确不做，所以也不假装支持。）
+ * @returns {{word, ipa, pos, meaning, collection, id}|null}
+ */
+/**
+ * `lookupWord` 的小写拼写 → 词条 索引，首次查词时懒建（见该函数内的说明）。
+ * 模块级变量：摊平进产物后就是顶层绑定，整包共享一份。
+ */
+let LOOKUP_INDEX = null;
+
+export function lookupWord(word, preferCollection = null) {
+  const key = String(word ?? '').trim().toLowerCase();
+  if (!key || !/^[a-z][a-z'-]*$/.test(key)) return null;
+
+  /*
+   * 懒建索引（首次调用时建，之后复用）。
+   *
+   * 为什么需要：6 个词库一共 29,841 个词，如果每次都线性扫一遍，
+   * 批量导入 50 个词就是 50 × 29,841 ≈ 150 万次字符串比较 —— 卡在点击那一帧里。
+   * 建一次 Map 是 3 万次插入，之后每次查词就是一次哈希查找。
+   *
+   * 每个词只留**第一次**命中（顺序就是 COLLECTIONS 的键序），
+   * 所以「同一个词在多个考纲里都有」时结果稳定、不会因为查询顺序变化而改释义。
+   * 代价是拿不到「这个词在 GRE 里也出现」这类信息 —— 界面不需要，不为此增复杂。
+   */
+  if (!LOOKUP_INDEX) {
+    LOOKUP_INDEX = new Map();
+    for (const c of Object.keys(COLLECTIONS)) {
+      for (const w of seedFor(c)) {
+        const k = String(w.word).toLowerCase();
+        if (!LOOKUP_INDEX.has(k)) LOOKUP_INDEX.set(k, { entry: w, collection: c });
+      }
+    }
+  }
+
+  const hit = LOOKUP_INDEX.get(key);
+  if (!hit) return null;
+  const { entry: w, collection: c } = hit;
+
+  // 种子里的考试词库只有 word/ipa/meaning（没有词性字段），
+  // 就从释义开头把「n.」「vt.」这种标记抠出来当 pos。
+  const meaning = w.meaning || '';
+  const m = meaning.match(/^\s*((?:[a-z]+\.){1,3})\s*/i);
+  return {
+    word: w.word,
+    ipa: w.ipa || '',
+    pos: w.pos || (m ? m[1] : ''),
+    meaning: (m ? meaning.slice(m[0].length) : meaning).trim() || meaning,
+    collection: c,
+    id: w.id || `${c}:${w.word}`,
+  };
+}
+
 /** 给词库种入初始记忆（e=0.3，区分「真会」与「未校准」—— 规格 §5.4）。 */
 export function seedMemories(words, existing = {}, now = Date.now()) {
   const mem = { ...existing };
