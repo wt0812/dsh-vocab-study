@@ -223,9 +223,10 @@ try {
   const listFile = resolve(outDir, '_frames.txt');
   writeFileSync(listFile, lines.join('\n') + '\n', 'utf8');
 
-  const out = resolve(outDir, 'demo.webp');
+  // ── 输出 ①：WebP ────────────────────────────────────────
   // ffmpeg 9 已经把 -vsync 删了（换成 -fps_mode），照旧知识写会报
   // Unrecognized option 'vsync'。这里用 -fps_mode vfr 保留 concat 里各帧的时长。
+  const out = resolve(outDir, 'demo.webp');
   const rc = spawnSync(FFMPEG, [
     '-y', '-loglevel', 'error',
     '-f', 'concat', '-safe', '0', '-i', listFile,
@@ -237,11 +238,47 @@ try {
   ], { encoding: 'utf8' });
   if (rc.status !== 0) throw new Error('ffmpeg 失败: ' + (rc.stderr ?? '').slice(0, 400));
 
+  // ── 输出 ②：GIF（2026-10-13 补）────────────────────────
+  //
+  // 为什么补这个：原先只出 WebP，是因为我以为"GIF 一定更大"。实测**反了** ——
+  //
+  //     原 WebP                 660×730   255,488 B
+  //     GIF（从这里的 PNG 帧出）  660×730   163,540 B   ← 小 36%
+  //     GIF（拿 WebP 再转）       660×730   460,977 B   ← 二次有损，胖到 1.8 倍
+  //
+  // 从无损 PNG 一次量化比"WebP 再转一次"干净得多，所以又小又清楚。
+  // 另一个好处是**所有平台都认 GIF**，动图 WebP 有些平台不认。
+  //
+  // 两个坑都写在参数里了：
+  //   · max_colors=256 且**不要**加 fps 滤镜 —— 加了 fps 会把 VFR 重采样成
+  //     "每帧铺满"的固定帧率（15 帧 → 80 帧），时长看着对但体积和节奏都变。
+  //   · dither=bayer 在深色 UI 上比默认抖动更干净（进度条/圆环不易出色带）。
+  const outGif = resolve(outDir, 'demo.gif');
+  const vfGif =
+    'split[a][b];[a]palettegen=max_colors=256[p];[b][p]paletteuse=dither=bayer';
+  const rc2 = spawnSync(FFMPEG, [
+    '-y', '-loglevel', 'error',
+    '-f', 'concat', '-safe', '0', '-i', listFile,
+    '-fps_mode', 'vfr',
+    '-vf', vfGif,
+    '-loop', '0',
+    outGif,
+  ], { encoding: 'utf8' });
+  if (rc2.status !== 0) throw new Error('ffmpeg 出 GIF 失败: ' + (rc2.stderr ?? '').slice(0, 400));
+
   // 自检：页数必须等于帧数，且各帧真的不一样
   const meta = await sharp(out, { animated: true }).metadata();
+  const metaGif = await sharp(outGif, { animated: true }).metadata();
   const ok = meta.pages === frames.length;
+  const okGif = metaGif.pages === frames.length;
+  // GIF 的帧延时必须和 WebP 逐帧一致 —— 不然"动图"的节奏悄悄变了
+  const sameTiming =
+    JSON.stringify(meta.delay ?? []) === JSON.stringify(metaGif.delay ?? []);
   console.log(`  动图 → ${out}`);
   console.log(`  ${meta.width}x${meta.height} · ${meta.pages} 页 · ${(readFileSync(out).length / 1024).toFixed(0)} KB · ${ok ? '✅ 页数对' : `❌ 页数不对（期望 ${frames.length}）`}`);
+  console.log(`  动图 → ${outGif}`);
+  console.log(`  ${metaGif.width}x${metaGif.height} · ${metaGif.pages} 页 · ${(readFileSync(outGif).length / 1024).toFixed(0)} KB · ${okGif ? '✅ 页数对' : `❌ 页数不对（期望 ${frames.length}）`} · ${sameTiming ? '✅ 延时与 WebP 一致' : '❌ 延时与 WebP 不一致'}`);
+
 
   const prints = [];
   for (let i = 0; i < (meta.pages ?? 1); i++) {
