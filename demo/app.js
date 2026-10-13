@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-13T01:51:32Z
+ * 构建时间：2026-10-13T05:00:27Z
  */
 'use strict';
 
@@ -35739,11 +35739,34 @@ function createPanel(app, ctx = {}) {
     else renderSettings(body, st, app);
 
     // 底部：连击 + 今日进度
-    // 分子用 st.covered（覆盖了多少个**不同的词**），不用 session.stats.answered
-    // —— 后者数的是"卡"，重训会让 20 个词变成 60，和"词"为单位的分母一除
-    // 就是「60/20」。详见 core/app.mjs 里 covered 那段注释。
-    const done = st.container?.done ?? (typeof st.covered === 'number' ? st.covered : (st.session ? st.session.stats.answered : 0));
-    const size = st.container?.stats?.containerSize ?? st.session?.plannedSize ?? 0;
+    //
+    // 分子优先用 st.covered（这一轮覆盖了多少个**不同的词**），理由有两条，
+    // 都是实测踩出来的：
+    //
+    // ① 不能用 session.stats.answered —— 它数的是"卡"，重训会让 20 个词变成 60，
+    //    和"词"为单位的分母一除就是「60/20」。详见 core/app.mjs 里 covered 那段注释。
+    //
+    // ② **不能优先用 container.done。**（2026-10-13 修，用户实测报的）
+    //    container.done 只在 settle() 里写，也就是**一轮走完**才更新。
+    //    所以用户点「再背一轮」之后，新一轮从 0 开始，而 container.done 还停
+    //    在上一轮的成绩上：底部显示「今日 20/20」，而进度环已经很诚实地回到 0/20。
+    //    实测复现（一轮 20 词，全「会了」）：
+    //        走完第 1 轮    环 20/20   底部 今日 20/20   ✅ 一致
+    //        点「再背一轮」  环  0/20   底部 今日 20/20   ❌ 底部卡住
+    //        走完第 2 轮    环 20/20   底部 今日 20/20   ❌ 少算一轮
+    //    用户看到的就是「一个 0/6 和一个 11」这种自相矛盾的画面 —— 他怀疑数字是假的，
+    //    这个怀疑是对的，底部那个确实是错的。
+    //
+    //    为什么不是把底部改成"今天的总量"：底部展示的是**这一轮走完没**，
+    //    和环同口径才说得通；"今天一共背了几个"已经有 KPI `今天已背 N` 在管，
+    //    两个数各归各位（和 deckContent 里那条注释同一个道理）。
+    //    container.done 只作为最后兜底，形状不全时不至于变 undefined。
+    const done = typeof st.covered === 'number'
+      ? st.covered
+      : (st.session ? st.session.stats.answered : (st.container?.done ?? 0));
+    // 分母同理优先跟环走（st.session.plannedSize）。容器那个值对不上"再背一轮"
+    // 之后的本轮规模，两处不一致会让「今日 X/Y」的分母显得比环大。
+    const size = st.session?.plannedSize ?? st.container?.stats?.containerSize ?? 0;
     const combo = st.combo?.combo || 0;
     mount(
       foot,

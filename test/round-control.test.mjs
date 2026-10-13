@@ -11,6 +11,7 @@ import { createApp } from '../core/app.mjs';
 import * as S from '../core/session.mjs';
 import * as Q from '../core/queue.mjs';
 import { createStorage } from '../store/client-store.mjs';
+import { readFileSync } from 'node:fs';
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', DIM = '\x1b[2m', OFF = '\x1b[0m';
 let pass = 0, fail = 0;
@@ -94,6 +95,79 @@ console.log('\n② 「再背一轮」（用户抱怨"只能换词库"）：');
   // 重背不重复扣分：记忆数据是连续更新的，不是清零
   const s = after.session;
   ok('重背没有清空记忆表（不是"作废重来"）', Object.keys(s.mem).length > 0);
+}
+
+// ── ②.5 底部的「今日 X/Y」不许停在上一轮（用户实测报的）────────
+//
+// 用户截图：进度环 0/6，KPI「今天已背 11」，而底部写「今日 0/6」——
+// 三个数字互相打架，他怀疑是假数据。查出来底部读的是 container.done，
+// 而那个值只在 settle()（一轮走完）时才写，所以点「再背一轮」之后它
+// 还停在上一轮：底部说 20/20，环已经很诚实地回到 0/20。
+//
+// 这一节守的就是「底部必须和环同口径」。断言直接照抄 ui/panel.mjs 里
+// renderFoot 取 `done` / `size` 的表达式 —— 改了那边不改这边，这条就会红。
+console.log('\n②.5 底部「今日 X/Y」与进度环必须同口径（不许停上一轮）：');
+{
+  const footDone = (st) => (typeof st.covered === 'number'
+    ? st.covered
+    : (st.session ? st.session.stats.answered : (st.container?.done ?? 0)));
+  const footSize = (st) => st.session?.plannedSize ?? st.container?.stats?.containerSize ?? 0;
+
+  const app = await freshApp();
+  const planned = app.state.roundSize;
+
+  runRound(app, S.RATING.KNOWN);
+  const r1 = app.state;
+  ok('走完第 1 轮：底部 = 本轮全部（20/20）',
+     footDone(r1) === planned && footSize(r1) === planned,
+     `底部 ${footDone(r1)}/${footSize(r1)}，本轮 ${planned}/${planned}`);
+  ok('走完第 1 轮：底部与环一致',
+     footDone(r1) === r1.covered, `底部 ${footDone(r1)} vs 环 ${r1.covered}`);
+
+  // ⚠️ 这里**必须读源码**，不能只验快照。
+  //
+  // 先说清楚为什么：`container.done` 在"没走 settle() 的轮次"里是 undefined，
+  // 而旧写法 `st.container?.done ?? st.covered` 靠 `??` 会**恰好落到同一个值**。
+  // 所以只验快照的断言在`旧写法`下**也是绿的** —— 我第一版就是这样的假守卫，
+  // 回退源码实测它照样全绿，等于没守。真正会变的只有一个地方：**源码里谁在前**。
+  // 这条直接把 ui/panel.mjs 里 render() 的那段赋值抠出来看顺序。
+  const panelSrc = readFileSync(new URL('../ui/panel.mjs', import.meta.url), 'utf8');
+  // 不用正则（注释里也会出现 st.container?.done，非贪婪窗口会被它截断）——
+  // 直接按行找那条语句，再看两件事：谁在前、有没有把 container.done 当首选。
+  const allLines = panelSrc.split('\n');
+  const stmtLines = [];
+  const at = allLines.findIndex((l) => l.trim().startsWith('const done = typeof st.covered'));
+  if (at >= 0) {
+    let k = at;
+    while (k < allLines.length && !allLines[k].trim().endsWith('container?.done ?? 0));') && k < at + 8) {
+      stmtLines.push(allLines[k]);
+      k++;
+    }
+    stmtLines.push(allLines[k]);
+  }
+  const stmt = stmtLines.join('\n');
+  ok('ui/panel.mjs 里能抠出底部 done 的赋值语句', stmt.length > 0,
+     stmt.length ? '' : '没找到 `const done = typeof st.covered` —— 写法变了要同步改这条断言');
+  if (stmt) {
+    const iCovered = stmt.indexOf('st.covered');
+    const iContainer = stmt.indexOf('st.container?.done');
+    ok('★ 源码里 st.covered（本轮）必须排在 st.container?.done 前面',
+       iCovered >= 0 && iContainer > iCovered, `covered@${iCovered} container.done@${iContainer}`);
+    ok('★ 底部不是把 container.done 当首选（那是「停上一轮」的旧写法）',
+       !/const done = st\.container\?\.done/.test(stmt), stmt.split('\n')[0].trim().slice(0, 56));
+  }
+
+  // 再走一轮（要真的"再背一轮"才会有第二轮，否则 KPI 不会累计）
+  app.restartRound();
+  runRound(app, S.RATING.KNOWN);
+  const r3 = app.state;
+  ok('走完第 2 轮：底部回到满格',
+     footDone(r3) === footSize(r3) && footDone(r3) > 0, `底部 ${footDone(r3)}/${footSize(r3)}`);
+  // 「今天已背」是跨轮累计，底部只看本轮 —— 两轮各 20，今天 40。
+  // 这条守的是"别把两个口径合成一个"：谁要是把底部改成累计，它会变成 40/20。
+  ok('走完第 2 轮：KPI「今天已背」= 两轮之和，而底部仍只看本轮',
+     r3.stats.todayAnswered === planned * 2 && footDone(r3) === planned,
+     `今天已背 ${r3.stats.todayAnswered}（期望 ${planned * 2}） vs 底部 ${footDone(r3)}（期望 ${planned}）`);
 }
 
 // ── ③ 必须能"自己往后背"（突破当天 N）────────────────────────
