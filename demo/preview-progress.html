@@ -748,7 +748,11 @@
   display: flex; align-items: baseline; gap: 8px; padding: 6px 2px;
   border-bottom: 1px solid var(--vs-line-soft); font-size: 13px;
 }
-.vs-row .w { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 单词列**不许被压缩**：flex: 0 0 auto（原来是 flex-shrink:1，会被挤出省略号）。
+ * 原来的写法没写 flex，默认 flex-shrink:1；而释义那列是 `flex:1 1 auto`，
+ * 于是空间一紧张就轮到**单词**被截 —— sentinel 显示成「senti…」。
+ * 单词比释义短得多，怎么轮都轮不到它被截；要截就让释义去承担。 */
+.vs-row .w { flex: 0 0 auto; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vs-row .m { color: var(--vs-ink-soft); font-size: 12px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vs-row .t { font-family: var(--vs-mono); font-size: 10.5px; color: var(--vs-ink-faint); flex: 0 0 auto; }
 .vs-report { background: var(--vs-chip); border-radius: var(--vs-radius); padding: 11px 12px; font-size: 12.5px; line-height: 1.7; }
