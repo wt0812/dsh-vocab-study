@@ -67,6 +67,100 @@ node tools/verify-market-entry.mjs <一个装了 js-yaml 的目录>
 是维护者本机跑脚本批量挑绿的合，**每批约 12 个，无固定时间表**
 （10-08 跑了 5 批，10-09 只跑 1 批）。所以"什么时候合"没有可预测的时刻。
 
+**2026-10-15 复查 —— 队列不是严格按编号顺序，我们被越过去了**：
+
+| 日期 | 合并推进到 | 我的 #7043 |
+|---|---|---|
+| 10-14 | #6330 | 未合并 |
+| 10-15 | **#7480**（尾部 #7536） | **仍未合并，被越过约 440 个编号** |
+
+`#7043` 的体检结果：`state=OPEN`、`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`、
+`mergedAt=null`、`closedAt=null`、0 条评论、0 个 label、CI 双绿（`check` + `Submission gate`）。
+**没有发现任何被拒或被卡的迹象**，就是单纯没被挑中。
+
+> ⚠️ **别去重提、别评论、别 push、别 close & reopen。** 上游 pr-gate 明确写了年龄门槛会自动清除。
+> 所有"催一下"的动作都只会把 `updatedAt` 刷新，没有证据表明能提高被挑中的概率。
+
+---
+
+## 更新说明（市场上那个「更新内容」弹窗）—— 数据从哪来
+
+**结论：来自 `updates.json`，而 `updates.json` 来自市场主分支的目录条目。**
+所以 —— **没合并 = 弹窗里没有更新说明。跟 Release 写得好不好无关。**
+
+读的是 `dshmarket` 自己的代码（`src/changelog.ts`，`updateNotesFor()`）：
+
+```
+UPDATES_PACKAGE = 'dsh-plugin-updates'          ← 一个专门的 npm 包
+UPDATES_FILE    = 'package/updates.json'
+ORIGIN_UPDATES  = 'https://awesome-dsh-plugin.com/updates.json'
+```
+
+`updates.json` 的 key 是**仓库 URL**，值是 `{ release: {tag, publishedAt, body, …}, commits: [...] }`。
+那个 npm 包的 `repository` 字段指回 `awesome-dsh-plugin/awesome-dsh-plugin` —— 就是市场本体。
+
+**拉取顺序**（`loadUpdateNotes()`）：先试 npm 包 `dsh-plugin-updates`（走地区镜像），
+失败再试 `awesome-dsh-plugin.com/updates.json`，各重试 2 次。缓存 TTL **1 小时**。
+
+**四级降级**（`updateNotesFor()` 的返回 `kind`）：
+
+| 优先级 | kind | 弹窗显示 | 条件 |
+|---|---|---|---|
+| 1 | `release` | 「版本说明」+ tag + 日期 + **Release 正文** | `entry.release.body !== '' \|\| entry.release.tag !== null` |
+| 2 | `commits` | 「提交记录」+ 圆点列表 | `entry.commits.length > 0` |
+| 3 | `npm` | 「版本发布时间」 | **仅当** `specKey === null && npmName !== null`（即 npm 形态安装） |
+| 4 | `source` | 「市场还没收录这个插件的更新说明。」+「去仓库看改了什么」 | `entry === undefined` |
+| 5 | `none` | 「该插件未提供更新说明。」 | 兜底 |
+
+**2026-10-16 实测验证**（对照实验，不是推测）：
+
+| 仓库 | PR 状态 | 在 `updates.json` 里 |
+|---|---|---|
+| `58catmiao/dsh-sciwork` | #7480 已合并(10-15) | ✅ 在 |
+| `1015677515/dsh-prompt-ErrorNotes-desk` | #7461 已合并(10-15) | ✅ 在 |
+| `Domaki-co/dsh-message-forward` | #7418 已合并(10-15) | ✅ 在 |
+| **`wt0812/dsh-vocab-study`** | **#7043 未合并** | **❌ 不在**（4765 条里一条都不含 "vocab"） |
+
+### Release 正文要写成什么样
+
+市场弹窗里**摘要段是裸段落**（不是标题），**重要变更是引用块**，功能/修复是小节标题：
+
+```markdown
+（摘要段：一句话说清这版干了什么，裸段落，不要 # 标题）
+
+> **重要变更**：本版有没有破坏性改动、要不要手工迁移。没有就明说"无"。
+
+### 新功能
+
+- …
+
+### 修复
+
+- …
+
+### 其他改动
+
+- …
+```
+
+**踩过的坑**：
+
+- 弹窗正文过**白名单渲染**（`renderMarkdown`）：先剥 HTML，只留
+  **标题 / 引用 / 代码块 / 圆点 / 粗体 / 行内代码 / https 链接 / 白名单图片**。
+  表格、`---` 分隔线、图片之外的内联 HTML 都会被丢掉。
+- 所以**首行别写 `## 一句话`** —— 那会被渲染成一个不该有的特大标题。
+  摘要段就该是裸段落（对齐上游实际渲染的样子）。
+- **纯修复版不要硬编 `### 新功能`**（0.2.1/0.2.4/0.2.5 就没有），空着比编一个"无"更干净。
+- 版本号跳号要明说（我们从 0.2.1 直接到 0.2.3，npm 上没有 0.2.2）。
+
+**已补齐**（2026-10-16）：`v0.2.0 / v0.2.1 / v0.2.3 / v0.2.4 / v0.2.5` 全部建了 Release
+（此前只有 `v0.1.0` 和 `v0.2.6`），`v0.2.6` 也重排成了上面的结构。
+**当前 7 个 npm 版本 ↔ 7 个 Release，一一对应。**
+
+> ⚠️ **诚实边界：这个改动的效果我无法在合并前验证。**
+> 因为弹窗根本读不到我们这条路 —— 市场没收录就没数据。
+> 等 PR 合并、次日 `updates.json` 重生成之后，才能看到弹窗里到底长什么样。
+
 **关于 `--profile`：这是最容易搞错的一处 —— 正确写法就是 `--profile web`。**
 
 DSH 按 profile 分目录装插件。`dsh plugin` 是命令行工具，它把后面的参数
