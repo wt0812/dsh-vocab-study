@@ -40,12 +40,19 @@ function ok(name, cond, detail) {
 console.log('vocab-study · 周度回顾\n');
 
 // 2026-10-19 是周一。所以「上一个自然周」= 10-12(周一) … 10-18(周日)。
-const MONDAY = Date.parse('2026-10-19T09:00:00+08:00');
-const PREV_MON = Date.parse('2026-10-12T10:00:00+08:00');
-const PREV_WED = Date.parse('2026-10-14T10:00:00+08:00');
-const PREV_THU = Date.parse('2026-10-15T10:00:00+08:00');
-const PREV_FRI = Date.parse('2026-10-16T10:00:00+08:00');
-const TWO_WEEKS_AGO = Date.parse('2026-10-11T10:00:00+08:00'); // 上周之前
+//
+// 这里必须用**本地时间构造**，不能写死 '+08:00' 偏移：
+// 学习日以**本地** 4:00 分界（规格 §7.3，熬夜不劈成两天），
+// 而 '2026-10-19T09:00:00+08:00' 在 UTC 机器上是当地 **01:00** —— 早于 4:00，
+// 学习日回退成 10-18，整周跟着往前错一天。本机（UTC+8）测不出来，
+// GitHub Actions 那两个红叉就是这么来的（test 20 / test 22 都挂在这两条断言上）。
+const localAt = (y, m, d, h) => new Date(y, m - 1, d, h, 0, 0, 0).getTime();
+const MONDAY = localAt(2026, 10, 19, 9);
+const PREV_MON = localAt(2026, 10, 12, 10);
+const PREV_WED = localAt(2026, 10, 14, 10);
+const PREV_THU = localAt(2026, 10, 15, 10);
+const PREV_FRI = localAt(2026, 10, 16, 10);
+const TWO_WEEKS_AGO = localAt(2026, 10, 11, 10); // 上周之前
 
 let clock = MONDAY;
 

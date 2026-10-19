@@ -14,6 +14,13 @@ jobs:
       fail-fast: false
       matrix:
         node: ['20', '22']
+        # 时区也进矩阵：学习日按**本地** 4:00 分界（规格 §7.3），
+        # 测试里一旦写死某个时区偏移，换一个时区就整体错一天。
+        # 0.2.8 第一次 CI 就是这么红的（test 20 / test 22 两条断言全挂），
+        # 而本机 UTC+8 永远绿 —— 所以两个方向都得常跑。
+        tz: ['UTC', 'Asia/Shanghai']
+    env:
+      TZ: ${{ matrix.tz }}
 
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +58,7 @@ jobs:
           fi
           echo "✓ 产物可复现，与提交一致"
 
-      - name: 八个测试套件
+      - name: 十个测试套件
         run: npm test
 
       - name: 构建期守卫：命名空间清单漏项

@@ -22,11 +22,16 @@ function ok(name, cond, detail) {
 }
 
 // 假时钟：run 内可以推进，用来模拟"跨天"
-let clock = Date.parse('2026-10-09T09:00:00+08:00');
+//
+// 用本地时间构造，不写死 '+08:00'：学习日按**本地** 4:00 分界（规格 §7.3），
+// '2026-10-09T09:00:00+08:00' 在 UTC 机器上是当地 01:00，早于 4:00，
+// 学习日会回退成 10-08 —— 同一类 CI 时区坑（weekly-report 已先栽过）。
+const startOfDay = () => new Date(2026, 9, 9, 9, 0, 0, 0).getTime();
+let clock = startOfDay();
 const tick = (ms) => { clock += ms; };
 
 async function freshApp() {
-  clock = Date.parse('2026-10-09T09:00:00+08:00');
+  clock = startOfDay();
   const app = createApp({ now: () => clock });
   await app.init();
   return app;
@@ -523,7 +528,7 @@ console.log('\n⑧ 换词库（用户抱怨"显示更换成功但主页没反应
 //      查了会假绿），必须查**界面真正用的那个数**：containerSize / roundSize。
 console.log('\n⑨ 设置留痕（关掉再打开，我设的还得是我设的）：');
 {
-  clock = Date.parse('2026-10-09T09:00:00+08:00');
+  clock = startOfDay();
   // 同一份内存存储 → 模拟"关掉 DSH 再打开"（每次重开都是一个新 app 实例）
   const shared = (() => {
     const box = new Map();
@@ -631,7 +636,7 @@ console.log('\n⑩ 真的存储件：写进去的，读得出来（用户报「�
      !!legacy && legacy.settings && legacy.settings.dailyGoal === 3);
 
   // ② 端到端：设成 10 → 关掉（时间前进）→ 重开，必须还是 10
-  clock = Date.parse('2026-10-09T09:00:00+08:00');
+  clock = startOfDay();
   const storeA = createStorage({ namespace: NS, now: () => clock });
   const appA = createApp({ storage: storeA, now: () => clock });
   await appA.init();
