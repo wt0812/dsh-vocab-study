@@ -141,8 +141,18 @@ export function classifyError(rec, { wordById } = {}) {
 /**
  * 诊断句：把错误日志归纳成一句人话（规格 §7.1 诊断层）。
  * 输出 { kind, pct, total, sentence }，sentence 里绝不出现指责性措辞（P3）。
+ *
+ * @param {object[]} records 错误记录。**调用方决定范围**：
+ *   今日 tab 传今天的记录，周报传上一周的记录。
+ * @param {object} [opts]
+ * @param {string} [opts.when='今天'] 时间词，会拼进句子里（「今天」「上周」）。
+ *   之前这里写死「今天」，周报传的是 7 天记录却说「今天的 42 个错词」——
+ *   用户今天只背了 9 个词，看到 42 直接判定是 bug。这个参数就是修它。
+ *
+ * 另外注意：`total` 数的是**错误次数**（每条记录一次），不是「错词个数」。
+ * 同一个词错 3 次就是 3。所以句子里一律说「N 次错误」，不说「N 个错词」。
  */
-export function diagnosis(records, { wordById, minErrors = 3 } = {}) {
+export function diagnosis(records, { wordById, minErrors = 3, when = '今天' } = {}) {
   const counts = new Map();
   let total = 0;
   for (const r of records) {
@@ -157,19 +167,19 @@ export function diagnosis(records, { wordById, minErrors = 3 } = {}) {
   let sentence;
   switch (kind) {
     case ERROR_KIND.sound:
-      sentence = `你今天错的 ${total} 个词里 ${n} 个是发音相近的 —— 我用读音帮你把它们分开。`;
+      sentence = `你${when}有 ${total} 次错误，其中 ${n} 次是发音相近的 —— 我用读音帮你把它们分开。`;
       break;
     case ERROR_KIND.shape:
-      sentence = `今天的错误集中在拼写相近的词上（${n}/${total}）—— 下次出题我会专挑它们对着考。`;
+      sentence = `${when}的错误集中在拼写相近的词上（${n}/${total}）—— 下次出题我会专挑它们对着考。`;
       break;
     case ERROR_KIND.meaning:
-      sentence = `今天的错误里 ${n}/${total} 是意思挨着的词 —— 我把它们放进辨析队列了。`;
+      sentence = `${when}的错误里 ${n}/${total} 是意思挨着的词 —— 我把它们放进辨析队列了。`;
       break;
     case ERROR_KIND.attention:
       sentence = `有 ${n} 次是在极短时间内点掉的 —— 我把那几张卡放慢了。`;
       break;
     default:
-      sentence = `今天的 ${total} 个错词以「没印象」为主 —— 这几个会早一点再见到。`;
+      sentence = `${when}的 ${total} 次错误以「没印象」为主 —— 这几个会早一点再见到。`;
   }
   return { kind, pct, total, sentence };
 }

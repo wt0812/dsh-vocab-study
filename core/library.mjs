@@ -6,6 +6,7 @@
 
 import { SEED_CET4_RAW, SEED_COLLECTIONS } from './seed-cet4.mjs';
 import { SEED_CET6, SEED_KAOYAN, SEED_TOEFL, SEED_GRE, SEED_IELTS } from './seed-exams.mjs';
+import { decompose, relativesOf } from './roots.mjs';
 
 export const SEED_CET4 = SEED_CET4_RAW;
 export const COLLECTIONS = SEED_COLLECTIONS;
@@ -89,13 +90,98 @@ export function parseWordlist(raw, collection = 'cet4', startSeq = 0) {
       example: r.example || r.ex || null,
       exampleZh: r.exampleZh || null,
       collocations: r.collocations || [],
-      roots: r.roots || null,
+      roots: r.roots || withRoots(word),
       synonyms: r.synonyms || [],
       confusables: r.confusables || [],
       topic: r.topic || null,
       collection,
       seq,
     });
+  }
+  return out;
+}
+
+// ── 词根词缀（数据层接线）──────────────────────────────────────────
+//
+// 为什么要有这几个函数：`ui/panel.mjs` 的「词根词源」折叠项**早就写好了**，
+// 但它只在词条带 `roots` 字段时才出现。而五个考纲词库是
+// `[单词, 音标, 释义]` 三元组格式，从来不提供这个字段 ——
+// 所以对 98% 以上的词，那个折叠项一直是空的。功能不是没做，是没喂数据。
+//
+// ⚠️ 必须**两个入口都补**：`parseWordlist`（远程/粘贴的词表）和
+//    `seedFor`（内置种子词库）。第一版只补了前者，单测全绿但界面是坏的 ——
+//    因为种子词库那条路根本不走 parseWordlist。
+
+/**
+ * 词库里自带 `roots` 就用它的（cet4 精编那 120 词人工写过，优先）；
+ * 没带就问词根表 —— **查不到就返回 null，不编**。
+ */
+function withRoots(word) {
+  try {
+    return decompose(word);
+  } catch {
+    return null; // 数据表坏了不该让整个词库解析失败
+  }
+}
+
+/** 词 → 释义 的懒建索引，**直接从原始种子数组建**，不走 seedFor（否则会递归）。 */
+let BRIEF_INDEX = null;
+
+function briefIndexOf() {
+  if (BRIEF_INDEX) return BRIEF_INDEX;
+  BRIEF_INDEX = new Map();
+  for (const c of Object.keys(SEED_BY_COLLECTION)) {
+    for (const raw of SEED_BY_COLLECTION[c] || []) {
+      const w = Array.isArray(raw) ? raw[0] : raw && raw.word;
+      const m = Array.isArray(raw) ? raw[2] : raw && raw.meaning;
+      const k = String(w ?? '').trim().toLowerCase();
+      if (!k || BRIEF_INDEX.has(k)) continue;
+      BRIEF_INDEX.set(k, String(m ?? ''));
+    }
+  }
+  return BRIEF_INDEX;
+}
+
+/**
+ * 同族词列表里用的**短释义**：去掉词性标记、只取第一个义项、超长截断。
+ * 折叠项里一行要放下 4–5 个词，释义不能太长。
+ */
+function briefMeaning(raw) {
+  let s = String(raw ?? '').trim();
+  if (!s) return '';
+  s = s.replace(/^\s*(?:[a-z]+\.\s*){1,3}/i, '').trim(); // 去掉开头的 "n." "vt." "a."
+  const cut = s.search(/[;；]/);
+  if (cut > 0) s = s.slice(0, cut).trim();
+  s = s.replace(/\s+/g, ' ');
+  if (s.length <= 18) return s;
+  const head = s.slice(0, 18);
+  const sp = head.lastIndexOf(' ');
+  return (sp > 8 ? head.slice(0, sp) : head).replace(/[,，、\s]+$/, '') + '…';
+}
+
+/**
+ * 同族词：和这个词共享词根的**我们词库里真实存在的**其他词，带短释义。
+ *
+ * 为什么放在这里而不是 roots.mjs：释义在种子词库里，roots.mjs 是纯数据表查询，
+ * 不该反过来依赖 library。分层清楚才不会绕成环。
+ *
+ * @param {string} word
+ * @param {number} [limit=5]
+ * @returns {{word: string, meaning: string}[]}
+ */
+export function familyOf(word, limit = 5) {
+  let rel = [];
+  try {
+    rel = relativesOf(word);
+  } catch {
+    return [];
+  }
+  if (!rel.length) return [];
+  const idx = briefIndexOf();
+  const out = [];
+  for (const r of rel) {
+    if (out.length >= limit) break;
+    out.push({ word: r.word, meaning: briefMeaning(idx.get(r.word) || ''), root: r.root, kind: r.kind });
   }
   return out;
 }
@@ -262,7 +348,24 @@ export function seedFor(collection = 'cet4') {
     return w;
   });
   return dedupeById(
-    norm.map((w) => ({ ...w, id: `${collection}:${w.word}`, collection: w.collection || collection }))
+    norm.map((w) => ({
+      ...w,
+      // ⚠️ roots 必须在这里补，不能只补在 parseWordlist 里。
+      // 这是**真实踩过的坑**：种子词库这条路不走 parseWordlist，
+      // 只在那边补的话，界面上「词根词源」折叠项对 5406 个六级词
+      // 一个都不会出现（实测 app.state.words 里 roots 字段直接不存在）。
+      // 单测因为直接调 parseWordlist，反而看不出来。
+      //
+      // ⚠️ 第二个坑：`...w` 必须在前、roots 在后。
+      // seed-cet4.mjs 的工厂函数给**每一条**都写了 `roots: extra.root ?? null`，
+      // 所以没有人工词根的词也带着 `roots: null` 这个键。
+      // 把 roots 写在 spread 前面会被它覆盖回 null —— 实测 cet4 只有 43 条有词根，
+      // 而正确答案是 79 条（43 人工 + 36 自动匹配）。
+      // 用 `??` 而不是 `||`：null / undefined 都兜底，且空串也算「没有」。
+      roots: w.roots ?? withRoots(w.word),
+      id: `${collection}:${w.word}`,
+      collection: w.collection || collection,
+    }))
   );
 }
 

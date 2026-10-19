@@ -12,6 +12,7 @@ __pycache__/
 # 注意 .md/.yml 也要挡：写 Release 说明时我差点把 _release-notes.md 提交进去
 # （它只是在本地存在过一小会儿，但下一次就不一定了）。
 /_*.py
+/_*.mjs
 /_*.txt
 /_*.json
 /_*.html
@@ -22,6 +23,11 @@ __pycache__/
 /_*.yaml
 # 截图/测量用的临时页面目录
 /_pages/
+# 词根数据源（ECDICT 的 wordroot.txt 有 362 KB，不进仓库；
+# 生成产物 core/roots-data.mjs 才进仓库。见 tools/make-roots.mjs）
+/_ecdict/
+# 本地视觉验证的截图输出（验证完就删，不进仓库）
+/_verify/
 
 # 安装器的备份（本机状态，不该进仓库）
 .dsh-install-backup/

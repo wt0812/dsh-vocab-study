@@ -90,7 +90,9 @@ export function renderProgress(root, st, app) {
     ]),
     el('div', { class: 'vs-sub', text: c.text }),
 
-    el('div', { class: 'vs-h2', text: '这半个月' }),
+    // 数据是 heatmap({ weeks = 15 }) → 15 周 = 105 天 ≈ 三个半月。
+    // 原来这里写「这半个月」（半月≈15 天），和数据差了 7 倍。
+    el('div', { class: 'vs-h2', text: '最近三个半月' }),
     heatmap(stats.heatmap),
     el('div', { class: 'vs-sub', text: '有学就着色；空白的日子什么也不说。' }),
 
@@ -577,29 +579,38 @@ function exportJson(app) {
   }
 }
 
-/** 周度对账单：一页，含一句诊断与下周建议（§7.5 证据③）。 */
+/**
+ * 周度回顾：一页，含一句诊断与下周建议（§7.5 证据③）。
+ *
+ * 文案纪律：**每个数字都要说清自己是什么**。
+ * 这张卡以前写的是「本周：学 56 词 · 收服 10 词 · 最长连续 2 天」，
+ * 而实际算的是「最近 7 天」+「历史最长」+「辨词答对次数」——
+ * 三个数字三种口径，全被套上「本周」，用户周一一看就知道不对。
+ */
 export function renderWeeklyReport(root, report) {
   clear(root);
   mount(
     root,
-    el('div', { class: 'vs-h2', text: '本周对账单' }),
+    el('div', { class: 'vs-h2', text: '上周回顾' }),
     el('div', { class: 'vs-report' }, [
       el('div', {}, [
-        document.createTextNode('本周：学 '),
+        document.createTextNode('上周：背了 '),
         el('span', { class: 'k', text: String(report.words) }),
-        document.createTextNode(' 词 · 收服 '),
-        el('span', { class: 'k', text: String(report.conqueredThisWeek) }),
-        document.createTextNode(' 词 · 最长连续 '),
+        document.createTextNode(' 个词 · 辨词答对 '),
+        el('span', { class: 'k', text: String(report.quizCorrect) }),
+        document.createTextNode(' 次 · 最长连续 '),
         el('span', { class: 'k', text: String(report.longestStreak) }),
         document.createTextNode(' 天'),
       ]),
-      report.stubborn ? el('div', { style: { marginTop: '5px' } }, [
-        document.createTextNode('最顽固：'),
-        el('span', { class: 'k', text: report.stubborn.word }),
-        document.createTextNode(`（错了 ${report.stubborn.e} 次）`),
-      ]) : null,
+      report.stubborn
+        ? el('div', { style: { marginTop: '5px' } }, [
+            document.createTextNode('最顽固：'),
+            el('span', { class: 'k', text: report.stubborn.word }),
+            document.createTextNode(`（错了 ${report.stubborn.times} 次）`),
+          ])
+        : null,
       report.diagnosis ? el('div', { style: { marginTop: '5px' }, text: `诊断：${report.diagnosis}` }) : null,
-      report.suggestion ? el('div', { style: { marginTop: '5px' }, text: `下周建议：${report.suggestion}` }) : null,
+      report.suggestion ? el('div', { style: { marginTop: '5px' }, text: `这周建议：${report.suggestion}` }) : null,
     ]),
   );
 }

@@ -448,7 +448,7 @@ export function createPanel(app, ctx = {}) {
     ];
     if (stats.heatmap && stats.heatmap.length) {
       parts.push(el('div', { class: 'vs-deck-heat' }, [
-        el('span', { class: 'lbl', text: '这半个月' }),
+        el('span', { class: 'lbl', text: '最近三个半月' }),
         heatmap(stats.heatmap),
       ]));
     }
@@ -581,7 +581,22 @@ export function createPanel(app, ctx = {}) {
     }
   }
 
-  /** 背面：三行内读完；例句 0 延迟；折叠项永不自动展开（§5.2）。 */
+  /**
+   * 背面：三行内读完；例句 0 延迟。
+   *
+   * 折叠项默认收起 —— **除了「词根词缀」**。
+   *
+   * 「词根词缀」默认展开是**故意违反规格 §5.2「折叠项永不自动展开」**的：
+   * 它的内容只有一行（`前缀 con(共同) · 词根 sider(星) · 后缀 -able(可…的)`），
+   * 收起时用户看到的是「▸ 词根词缀」几个字，要点一下才看到那行字 ——
+   * 多一次点击、零信息隐藏，纯亏。产品负责人 2026-10 明确要求默认展开。
+   *
+   * 「同族词」不一样：最多 5 条、每条还带释义，展开会顶掉例句和评分按钮，
+   * 所以它仍然收起（要看再点）。
+   *
+   * 规格 P1「面板永不自动展开」约束的是**面板/侧栏**不许自己弹出来抢焦点，
+   * 不是这张已经翻开的卡片背面里某个折叠块 —— 后者不改变用户正在干什么。
+   */
   function renderBack(stage, actions, st, card) {
     const r = st.lastReveal;
     if (r.quiz) {
@@ -608,11 +623,38 @@ export function createPanel(app, ctx = {}) {
     }
     if (w.roots) {
       folds.push(
-        el('details', { class: 'vs-fold' }, [
-          el('summary', { text: '词根词源' }),
+        el('details', { class: 'vs-fold', open: true }, [
+          el('summary', { text: '词根词缀' }),
           el('div', { class: 'vs-foldbody', text: w.roots }),
         ]),
       );
+    }
+    // 同族词：比「词根含义」更救命的记忆抓手 ——
+    // 你认识的 attract / contract / distract 和 abstract 是一家，
+    // 这比记住 "tract = 拉" 更容易。数据全部来自我们词库，是真词真释义。
+    // 懒查询：只在这一张卡的背面渲染时才算，不给启动加负担。
+    // 标题带上共享的词根（`同族词 · tract`），用户才知道凭什么算一家。
+    if (w.word) {
+      const fam = app.familyFor ? app.familyFor(w.word, 5) : [];
+      if (fam.length) {
+        const shared = fam[0].root || '';
+        folds.push(
+          el('details', { class: 'vs-fold' }, [
+            el('summary', { text: shared ? `同族词 · ${shared}` : `同族词 (${fam.length})` }),
+            el(
+              'div',
+              { class: 'vs-foldbody' },
+              el(
+                'ul',
+                {},
+                fam.map((f) =>
+                  el('li', { text: f.meaning ? `${f.word} — ${f.meaning}` : f.word }),
+                ),
+              ),
+            ),
+          ]),
+        );
+      }
     }
 
     mount(

@@ -51,9 +51,13 @@ CORE_EXPORTS = [
     # `SEED_CET6 is not defined` —— 包看着构建成功，一加载就崩。
     ("SEEDX", ["SEED_CET6", "SEED_KAOYAN", "SEED_TOEFL", "SEED_GRE", "SEED_IELTS",
                "SEED_EXAM_COUNTS"]),
+    # 词根词缀数据表（生成产物，见 tools/make-roots.mjs）与查询层。
+    # ⚠️ 顺序要紧：数据表 → 查询层 → library（library 要用它）。
+    ("RTD", ["ROOT_FAMILIES", "WORD_ROOTS", "MORPH_TABLE", "WORD_MORPH", "ROOTS_COVERAGE"]),
+    ("RT", ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine"]),
     ("L", ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
            "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
-           "contextSentence", "lookupWord", "SEED_CET4"]),
+           "contextSentence", "lookupWord", "familyOf", "SEED_CET4"]),
     ("SP", ["speechAvailable", "speak", "stopSpeaking", "speechSupportedLanguages"]),
     ("HK", ["HOOK_SOURCE", "HOOK_MAX_CHARS", "buildHook", "buildHooks", "createHookCache"]),
     ("Q", ["DAY_START_HOUR", "dayKey", "dayStartTs", "daysBetweenKeys", "priorDayKey",
@@ -76,6 +80,7 @@ CORE_EXPORTS = [
 # core-ref 注册表的键名（全名，界面层读的是这个）
 CORE_NS_KEY = {
     "M": "memory", "MK": "mistake", "SEED": "seed", "SEEDX": "seedExams",
+    "RTD": "rootsData", "RT": "roots",
     "L": "library", "SP": "speech", "HK": "hook",
     "Q": "queue", "G": "game", "B": "beckon", "S": "session", "A": "app",
 }
@@ -88,6 +93,10 @@ CORE_ORDER = [
     # 各考纲词库的内置词表（生成产物）。**必须在 library.mjs 前** ——
     # 摊平顺序就是依赖顺序，library.mjs 要用它的常量。
     "core/seed-exams.mjs",
+    # 词根词缀数据表 + 查询层（生成产物 + 纯查询，见 tools/make-roots.mjs）。
+    # **必须在 library.mjs 前**，library.mjs 要用 decompose / relativesOf。
+    "core/roots-data.mjs",
+    "core/roots.mjs",
     "core/library.mjs",
     "core/speech.mjs",
     "core/hook.mjs",

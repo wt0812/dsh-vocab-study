@@ -93,6 +93,10 @@ CORE_ORDER = [
     # 各考纲词库的内置词表（生成的，见 tools/make-seeds.mjs）。
     # **必须排在 library.mjs 前面** —— 顺序就是依赖顺序，L 要用它的常量。
     ("SEEDX", "core/seed-exams.mjs"),
+    # 词根词缀：数据表（生成产物）+ 查询层。**必须排在 L 前面**，
+    # library.mjs 要用 decompose / relativesOf。
+    ("RTD", "core/roots-data.mjs"),
+    ("RT", "core/roots.mjs"),
     ("L", "core/library.mjs"),
     ("SP", "core/speech.mjs"),
     ("HK", "core/hook.mjs"),
@@ -117,9 +121,11 @@ CORE_EXPORTS = {
     # 否则 L 里的 `SEED_CET6` 会变成未定义 → 整包加载就报 ReferenceError。
     "SEEDX": ["SEED_CET6", "SEED_KAOYAN", "SEED_TOEFL", "SEED_GRE", "SEED_IELTS",
               "SEED_EXAM_COUNTS"],
+    "RTD": ["ROOT_FAMILIES", "WORD_ROOTS", "MORPH_TABLE", "WORD_MORPH", "ROOTS_COVERAGE"],
+    "RT": ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine"],
     "L": ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
           "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
-          "contextSentence", "lookupWord", "SEED_CET4"],
+          "contextSentence", "lookupWord", "familyOf", "SEED_CET4"],
     "SP": ["speechAvailable", "speak", "stopSpeaking", "speechSupportedLanguages"],
     "HK": ["HOOK_SOURCE", "HOOK_MAX_CHARS", "buildHook", "buildHooks", "createHookCache"],
     "Q": ["DAY_START_HOUR", "dayKey", "dayStartTs", "daysBetweenKeys", "priorDayKey",

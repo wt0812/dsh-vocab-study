@@ -897,6 +897,26 @@ export function createApp(ports = {}) {
   }
 
   // ── 周报 ────────────────────────────────────────────────
+  /**
+   * 周度回顾（规格 §7.8：周一打开面板自动出一次）。
+   *
+   * ⚠️ 这里修过三个**用户看得见的错**（0.2.6 及以前）：
+   *
+   * 1. 窗口错：原来取 `now() - 7*DAY_MS`，那是「最近 7 天」，
+   *    周一早上打开时它等于「上周二…上周日 + 今天」，
+   *    却被标题写成「本周」。用户周一看到「本周学了 56 词」直接当 bug 报。
+   *    → 现在取**上一个自然周**：[上周一 4:00, 本周一 4:00)。
+   *
+   * 2. 最长连续错：原来读 `state.streak.longest`，那是**有史以来**最长，
+   *    挂在「本周」里是错的。→ 现在只在这一周的打卡日里数连续。
+   *
+   * 3. 诊断时间词错：原来传 7 天记录却让 diagnosis 说「今天」，
+   *    于是出现「今天 42 个错词」而用户今天只背了 9 个词。
+   *    → 现在明确传 when='上周'，且句子里说「次错误」不再说「个错词」。
+   *
+   * 「最顽固」也改成按这一周的错误**次数**（整数）算，
+   * 不再用记忆里的小数 e ——「错了 6.3 次」用户没法核对。
+   */
   function maybeWeeklyReport() {
     const key = Q.dayKey(now());
     const today = new Date(now());
@@ -904,31 +924,60 @@ export function createApp(ports = {}) {
     const last = state.settings.lastReportDay;
     if (last === key) return state.report || null;
     state.settings.lastReportDay = key;
-    const weekAgo = now() - 7 * DAY_MS;
-    const recs = state.records.filter((r) => r.ts >= weekAgo);
-    const words = new Set(recs.map((r) => r.wordId)).size;
-    const conqueredThisWeek = recs.filter((r) => r.correct && r.mode === 'quiz').length;
-    const diag = MK.diagnosis(recs, { wordById: wordByIdFn() });
-    const stubborn = stubbornWords(1)[0];
+
+    // 上一个自然周。dayStartTs 已经是「今天 4:00」这个分界，
+    // 周一减 7 天正好是上周一 4:00，区间左闭右开 = 上周一…上周日。
+    const weekEnd = Q.dayStartTs(now());
+    const weekStart = weekEnd - 7 * DAY_MS;
+    const recs = state.records.filter((r) => r.ts >= weekStart && r.ts < weekEnd);
+
+    const studied = new Set(recs.map((r) => r.wordId));
+    // 「辨词答对」= 辨词模式下答对的次数。真名就是它，不叫「收服」——
+    // 收服是硬判定（强度≥0.9 且辨词答对过），按次数凑不出来，别混着说。
+    const quizCorrect = recs.filter((r) => r.correct && r.mode === 'quiz').length;
+
+    // 这一周内最长连续打卡天数
+    const dayKeys = [...new Set(recs.map((r) => r.dayKey))].sort();
+    let longestStreak = 0;
+    let run = 0;
+    let prevKey = null;
+    for (const k of dayKeys) {
+      run = prevKey && Q.daysBetweenKeys(prevKey, k) === 1 ? run + 1 : 1;
+      if (run > longestStreak) longestStreak = run;
+      prevKey = k;
+    }
+
+    // 这一周最顽固：错误次数最多的那个词（整数次数）
+    const wrongCount = new Map();
+    for (const r of recs) {
+      if (!r.incorrect) continue;
+      wrongCount.set(r.wordId, (wrongCount.get(r.wordId) || 0) + 1);
+    }
+    const top = [...wrongCount.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topWord = top ? state.words.find((w) => w.id === top[0]) : null;
+
+    const diag = MK.diagnosis(recs, { wordById: wordByIdFn(), when: '上周' });
     const rec = suggestNextWeek(recs, diag);
     return {
-      weekStart: Q.dayKey(weekAgo),
-      words,
-      conqueredThisWeek,
-      longestStreak: state.streak.longest,
-      stubborn: stubborn ? { word: stubborn.w.word, e: stubborn.e } : null,
+      weekStart: Q.dayKey(weekStart),
+      weekEnd: Q.dayKey(weekEnd - DAY_MS), // 上周日（给测试/调试用，界面不显示）
+      words: studied.size,
+      quizCorrect,
+      longestStreak,
+      stubborn: topWord ? { word: topWord.word, times: top[1] } : null,
       diagnosis: diag.sentence,
       suggestion: rec,
     };
   }
 
+  // 建议是给**接下来这一周**的：周报在周一早上出，所以用「这周」而不是「下周」。
   function suggestNextWeek(recs, diag) {
     if (!recs.length) return null;
     const acc = recs.filter((r) => r.correct).length / recs.length;
     if (acc < 0.6 && diag?.kind === MK.ERROR_KIND.sound) {
-      return '下周把新词减到 15 个，先把读音像的那几组清掉。';
+      return '这周把新词减到 15 个，先把读音像的那几组清掉。';
     }
-    if (acc < 0.6) return '下周把新词减到 15 个，先把复习做完。';
+    if (acc < 0.6) return '这周把新词减到 15 个，先把复习做完。';
     if (acc > 0.85) return '手感不错 —— 想加量的话可以在设置里把每天调到 25 个。';
     return '照现在这样走就行。';
   }
@@ -1336,6 +1385,15 @@ export function createApp(ports = {}) {
     beckon,
     hookFor,
     hookPeek,
+    /**
+     * 同族词（界面「同族词」折叠项用）。
+     *
+     * 为什么是**懒查询**而不是塞进每个词条：
+     * 种子词库 29,845 条，如果每条都先算一遍同族词 + 释义，
+     * 启动时就要多做几万次字符串处理 —— 那是白等的几百毫秒。
+     * 而一轮只渲染 20 张卡，用到哪张查哪张，成本可以忽略。
+     */
+    familyFor: (word, limit) => L.familyOf(word, limit),
     refresh: () => {
       const key = Q.dayKey(now());
       // 跨天：新的一天要重新排容器，「自己往后背」的加量次数和本轮卡组也跟着重置。
