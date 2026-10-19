@@ -58,7 +58,7 @@ jobs:
           fi
           echo "✓ 产物可复现，与提交一致"
 
-      - name: 十个测试套件
+      - name: 十一个测试套件
         run: npm test
 
       - name: 构建期守卫：命名空间清单漏项

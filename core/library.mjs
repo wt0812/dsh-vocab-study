@@ -6,7 +6,7 @@
 
 import { SEED_CET4_RAW, SEED_COLLECTIONS } from './seed-cet4.mjs';
 import { SEED_CET6, SEED_KAOYAN, SEED_TOEFL, SEED_GRE, SEED_IELTS } from './seed-exams.mjs';
-import { decompose, relativesOf } from './roots.mjs';
+import { decompose, relativesOf, examplesOf, originOf } from './roots.mjs';
 
 export const SEED_CET4 = SEED_CET4_RAW;
 export const COLLECTIONS = SEED_COLLECTIONS;
@@ -81,16 +81,19 @@ export function parseWordlist(raw, collection = 'cet4', startSeq = 0) {
     const word = String(r.word || r.w || '').trim();
     if (!word || !/^[A-Za-z][A-Za-z '-]*$/.test(word)) continue;
     seq++;
+    // 例句：词表自己带的优先，没有就问 Tatoeba 语料（39% 左右的词能问出真实例句）。
+    const tatoeba = withExample(word);
     out.push({
       id: `${collection}:${word.toLowerCase()}`,
       word,
       ipa: r.ipa || r.phonetic || '',
       pos: r.pos || guessPos(r.meaning) || '',
       meaning: r.meaning || r.trans || r.zh || '',
-      example: r.example || r.ex || null,
-      exampleZh: r.exampleZh || null,
+      example: r.example || r.ex || (tatoeba ? tatoeba[0] : null),
+      exampleZh: r.exampleZh || (tatoeba ? tatoeba[1] : null),
       collocations: r.collocations || [],
       roots: r.roots || withRoots(word),
+      etym: r.etym ?? withEtym(word),
       synonyms: r.synonyms || [],
       confusables: r.confusables || [],
       topic: r.topic || null,
@@ -99,6 +102,30 @@ export function parseWordlist(raw, collection = 'cet4', startSeq = 0) {
     });
   }
   return out;
+}
+
+/**
+ * 例句补充：查不到就是 null（不编）。
+ * 包一层 try：数据表坏了不该让整个词库解析失败。
+ */
+function withExample(word) {
+  try {
+    return examplesOf(word);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 词源补充（Wiktionary）：`{ kind: 'split' | 'origin', text }` 或 null。
+ * 这是「词根词缀表拆不出来」时的第二条路，界面上和拆解分开显示。
+ */
+function withEtym(word) {
+  try {
+    return originOf(word);
+  } catch {
+    return null;
+  }
 }
 
 // ── 词根词缀（数据层接线）──────────────────────────────────────────
@@ -348,24 +375,32 @@ export function seedFor(collection = 'cet4') {
     return w;
   });
   return dedupeById(
-    norm.map((w) => ({
-      ...w,
-      // ⚠️ roots 必须在这里补，不能只补在 parseWordlist 里。
-      // 这是**真实踩过的坑**：种子词库这条路不走 parseWordlist，
-      // 只在那边补的话，界面上「词根词源」折叠项对 5406 个六级词
-      // 一个都不会出现（实测 app.state.words 里 roots 字段直接不存在）。
-      // 单测因为直接调 parseWordlist，反而看不出来。
-      //
-      // ⚠️ 第二个坑：`...w` 必须在前、roots 在后。
-      // seed-cet4.mjs 的工厂函数给**每一条**都写了 `roots: extra.root ?? null`，
-      // 所以没有人工词根的词也带着 `roots: null` 这个键。
-      // 把 roots 写在 spread 前面会被它覆盖回 null —— 实测 cet4 只有 43 条有词根，
-      // 而正确答案是 79 条（43 人工 + 36 自动匹配）。
-      // 用 `??` 而不是 `||`：null / undefined 都兜底，且空串也算「没有」。
-      roots: w.roots ?? withRoots(w.word),
-      id: `${collection}:${w.word}`,
-      collection: w.collection || collection,
-    }))
+    norm.map((w) => {
+      // 例句与词源同样要在这里补（理由见下面 roots 那两段注释 —— 同一类坑）：
+      // 种子词库这条路不走 parseWordlist，只在那补就等于没补。
+      const tatoeba = w.example ? null : withExample(w.word);
+      return {
+        ...w,
+        // ⚠️ roots 必须在这里补，不能只补在 parseWordlist 里。
+        // 这是**真实踩过的坑**：种子词库这条路不走 parseWordlist，
+        // 只在那边补的话，界面上「词根词源」折叠项对 5406 个六级词
+        // 一个都不会出现（实测 app.state.words 里 roots 字段直接不存在）。
+        // 单测因为直接调 parseWordlist，反而看不出来。
+        //
+        // ⚠️ 第二个坑：`...w` 必须在前、roots 在后。
+        // seed-cet4.mjs 的工厂函数给**每一条**都写了 `roots: extra.root ?? null`，
+        // 所以没有人工词根的词也带着 `roots: null` 这个键。
+        // 把 roots 写在 spread 前面会被它覆盖回 null —— 实测 cet4 只有 43 条有词根，
+        // 而正确答案是 79 条（43 人工 + 36 自动匹配）。
+        // 用 `??` 而不是 `||`：null / undefined 都兜底，且空串也算「没有」。
+        roots: w.roots ?? withRoots(w.word),
+        example: w.example ?? (tatoeba ? tatoeba[0] : null),
+        exampleZh: w.exampleZh ?? (tatoeba ? tatoeba[1] : null),
+        etym: w.etym ?? withEtym(w.word),
+        id: `${collection}:${w.word}`,
+        collection: w.collection || collection,
+      };
+    })
   );
 }
 

@@ -591,6 +591,11 @@ export function createPanel(app, ctx = {}) {
    * 收起时用户看到的是「▸ 词根词缀」几个字，要点一下才看到那行字 ——
    * 多一次点击、零信息隐藏，纯亏。产品负责人 2026-10 明确要求默认展开。
    *
+   * 「词源」（`来自拉丁语 stāmina`）的默认状态**跟着词根词缀走**：
+   *   · 这个词有词根词缀那一行 → 词源收起（不抢那一行的位置）
+   *   · 没有那一行 → 词源展开（否则这个卡片背面又是一片空白）
+   * 词源和词根词缀是两种东西：前者是"来源"，后者是"拆解"，混着显示就是骗人。
+   *
    * 「同族词」不一样：最多 5 条、每条还带释义，展开会顶掉例句和评分按钮，
    * 所以它仍然收起（要看再点）。
    *
@@ -621,11 +626,32 @@ export function createPanel(app, ctx = {}) {
         ]),
       );
     }
-    if (w.roots) {
+    // 词根词缀这一行：**手写词根表优先，维基的构词拆解兜底**。
+    // 两个来源都真，但语言上不是一回事：
+    //   - 手写表给的是「前缀 con(共同) · 词根 sider(星) · 后缀 -able(可…的)」
+    //   - 维基模板给的是「ab- + normal」，只有词素没有含义
+    // 所以兜底时前面挂「构词」两个字，别让人以为是词根释义。
+    const etym = w.etym;
+    let rootLineText = w.roots;
+    if (!rootLineText && etym && etym.kind === 'split') {
+      rootLineText = `构词：${etym.text}`;
+    }
+    if (rootLineText) {
       folds.push(
         el('details', { class: 'vs-fold', open: true }, [
           el('summary', { text: '词根词缀' }),
-          el('div', { class: 'vs-foldbody', text: w.roots }),
+          el('div', { class: 'vs-foldbody', text: rootLineText }),
+        ]),
+      );
+    }
+    // 词源：只能追到来源的词（`来自拉丁语 stāmina`）。
+    // 有词根词缀那一行时它**默认收起**（不抢那行的位置）；
+    // 没有时默认展开 —— 否则这个词背面又是一片空白。
+    if (etym && etym.kind === 'origin') {
+      folds.push(
+        el('details', { class: 'vs-fold', open: !rootLineText }, [
+          el('summary', { text: '词源' }),
+          el('div', { class: 'vs-foldbody', text: etym.text }),
         ]),
       );
     }

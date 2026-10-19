@@ -54,7 +54,13 @@ CORE_EXPORTS = [
     # 词根词缀数据表（生成产物，见 tools/make-roots.mjs）与查询层。
     # ⚠️ 顺序要紧：数据表 → 查询层 → library（library 要用它）。
     ("RTD", ["ROOT_FAMILIES", "WORD_ROOTS", "MORPH_TABLE", "WORD_MORPH", "ROOTS_COVERAGE"]),
-    ("RT", ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine"]),
+    # 例句（Tatoeba，CC BY 2.0）与词源（Wiktionary，CC BY-SA 4.0）数据表。
+    # 都是生成产物：tools/make-examples.py / tools/make-etym.py。
+    # **必须排在 RT 前面**：roots.mjs 的 examplesOf / originOf 要查它们。
+    ("EXD", ["EXAMPLES", "EXAMPLES_COVERAGE"]),
+    ("ETD", ["ETYM", "ETYM_COVERAGE"]),
+    ("RT", ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine",
+           "examplesOf", "originOf"]),
     ("L", ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
            "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
            "contextSentence", "lookupWord", "familyOf", "SEED_CET4"]),
@@ -81,6 +87,7 @@ CORE_EXPORTS = [
 CORE_NS_KEY = {
     "M": "memory", "MK": "mistake", "SEED": "seed", "SEEDX": "seedExams",
     "RTD": "rootsData", "RT": "roots",
+    "EXD": "examplesData", "ETD": "etymData",
     "L": "library", "SP": "speech", "HK": "hook",
     "Q": "queue", "G": "game", "B": "beckon", "S": "session", "A": "app",
 }
@@ -96,6 +103,9 @@ CORE_ORDER = [
     # 词根词缀数据表 + 查询层（生成产物 + 纯查询，见 tools/make-roots.mjs）。
     # **必须在 library.mjs 前**，library.mjs 要用 decompose / relativesOf。
     "core/roots-data.mjs",
+    # 例句 / 词源数据表（生成产物）。同样必须在 roots.mjs 之前。
+    "core/examples-data.mjs",
+    "core/etym-data.mjs",
     "core/roots.mjs",
     "core/library.mjs",
     "core/speech.mjs",

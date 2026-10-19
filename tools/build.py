@@ -96,6 +96,11 @@ CORE_ORDER = [
     # 词根词缀：数据表（生成产物）+ 查询层。**必须排在 L 前面**，
     # library.mjs 要用 decompose / relativesOf。
     ("RTD", "core/roots-data.mjs"),
+    # 例句（Tatoeba，CC BY 2.0）与词源（Wiktionary，CC BY-SA 4.0）两张数据表。
+    # 都是生成产物（tools/make-examples.py / tools/make-etym.py）。
+    # **必须排在 RT 前面**：roots.mjs 的 examplesOf / originOf 要查它们。
+    ("EXD", "core/examples-data.mjs"),
+    ("ETD", "core/etym-data.mjs"),
     ("RT", "core/roots.mjs"),
     ("L", "core/library.mjs"),
     ("SP", "core/speech.mjs"),
@@ -122,7 +127,10 @@ CORE_EXPORTS = {
     "SEEDX": ["SEED_CET6", "SEED_KAOYAN", "SEED_TOEFL", "SEED_GRE", "SEED_IELTS",
               "SEED_EXAM_COUNTS"],
     "RTD": ["ROOT_FAMILIES", "WORD_ROOTS", "MORPH_TABLE", "WORD_MORPH", "ROOTS_COVERAGE"],
-    "RT": ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine"],
+    "EXD": ["EXAMPLES", "EXAMPLES_COVERAGE"],
+    "ETD": ["ETYM", "ETYM_COVERAGE"],
+    "RT": ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine",
+           "examplesOf", "originOf"],
     "L": ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
           "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
           "contextSentence", "lookupWord", "familyOf", "SEED_CET4"],

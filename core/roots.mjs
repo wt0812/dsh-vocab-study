@@ -7,10 +7,46 @@
 // 绝不「猜一个词根」或「编一句所以意思是…」。
 
 import { ROOT_FAMILIES, WORD_ROOTS, MORPH_TABLE, WORD_MORPH } from './roots-data.mjs';
+// 例句（Tatoeba，CC BY 2.0）与词源（Wiktionary，CC BY-SA 4.0）都是**生成产物**，
+// 见 tools/make-examples.py / tools/make-etym.py。这一层只查，不生成。
+import { EXAMPLES } from './examples-data.mjs';
+import { ETYM } from './etym-data.mjs';
 
 // 注意：这里**不**转出 ROOTS_COVERAGE。
 // 摊平进同一作用域后，RSD 和 RT 各声明一个同名常量就是 SyntaxError（构建期会拦）。
 // 要用覆盖率数字请直接从 core/roots-data.mjs 取 —— 那里才是唯一来源。
+
+/**
+ * 查这个词的真实例句 → `[英文, 中文]`，没有就是 null。
+ *
+ * 数据来自 Tatoeba 中英对照语料，取的是「最短且完整」的那一句。
+ * **没有例句就返回 null** —— `ui/panel.mjs` 会自己去显示「暂无例句 / 生成」那条路。
+ */
+export function examplesOf(word) {
+  const key = String(word ?? '').trim().toLowerCase();
+  if (!key) return null;
+  const hit = EXAMPLES[key];
+  return Array.isArray(hit) ? hit : null;
+}
+
+/**
+ * 查这个词的真实词源 → `{ kind, text }`，没有就是 null。
+ *
+ * `kind` 两种，界面上必须分开显示（混在一起就是骗人）：
+ *   - `split`  构词拆解（维基模板明确给出前缀/后缀/复合词）→ 进「词根词缀」那一行
+ *   - `origin` 只能追到来源（`来自拉丁语 stāmina`）      → 进单独的「词源」折叠块
+ *
+ * 这是**补漏**用的：我们手写词根表能拆的词优先走 decompose()，
+ * 拆不出来的再问这里 —— 它能把「什么都没有」的那一半词的很大一部分救回来。
+ */
+export function originOf(word) {
+  const key = String(word ?? '').trim().toLowerCase();
+  if (!key) return null;
+  const hit = ETYM[key];
+  if (!Array.isArray(hit) || hit.length < 2) return null;
+  return { kind: hit[0], text: hit[1] };
+}
+
 
 /** 把词规整成查表用的键（数据表里全是小写）。 */
 function rootKeyOf(word) {

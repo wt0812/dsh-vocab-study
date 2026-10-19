@@ -35,10 +35,10 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 项 | 说明 |
 |---|---|
-| 版本 | `0.2.8`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
+| 版本 | `0.2.9`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
 | 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 400 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
-| 体积 | `lib/client.js` 3,003,897 B ≈ **2.86 MB**（内含六本词库共 **29,841** 词，见[为什么这么大](#构建)） |
+| 体积 | `lib/client.js` 4,578,922 B ≈ **4.37 MB**（内含六本词库共 **29,841** 词，见[为什么这么大](#构建)） |
 | 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
 | 国内镜像 | [gitee.com/wutong2005/dsh-vocab-study](https://gitee.com/wutong2005/dsh-vocab-study)（**与 GitHub 逐提交一致**，见下） |
 | 市场收录 | 已提 PR [awesome-dsh-plugin#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043)，**等上游合并** |
@@ -65,7 +65,7 @@ python tools/install.py
 > **镜像不是自动同步的**，是我推的。一切以 GitHub 为准。
 
 > 「成熟度」这一行我写得很克制：**能用**是真的（你亲手点过），
-> 但它是 0.2.8、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
+> 但它是 0.2.9、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
 
 ---
 
@@ -393,7 +393,7 @@ core/      纯逻辑。零宿主依赖，可跨环境运行（Node 里直接跑�
 > 冒充六级/雅思 —— 那是假数据，比"词表为空"更坏（空的用户知道不对，
 > 假的用户不知道，而且 id 前缀一变，学习记录全部对不上）。
 >
-> 代价是客户端产物从 314 KB 涨到约 2.86 MB。这是**用体积换离线可用**的
+> 代价是客户端产物从 314 KB 涨到约 4.37 MB。这是**用体积换离线可用**的
 > 明确取舍，不是意外。
 
 store/
