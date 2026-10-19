@@ -5,6 +5,50 @@
 
 ---
 
+## 0. 🔴【明天第一件事】npm 0.2.9 还没发出去
+
+**2026-10-19 晚，用户说「先别搞了，留存我明天来」。**
+
+已经做完的部分（都验证过）：
+
+| 步骤 | 状态 |
+|---|---|
+| 版本号 0.2.9（`package.json` / README） | ✅ |
+| `build-all` + 11 个测试套件（两个时区）全绿 | ✅ |
+| 提交 `64b8940` + 文档提交 `40c5a0d`，GitHub / Gitee 都推了 | ✅ |
+| tag `v0.2.9`（两边都推了） | ✅ |
+| GitHub Release `v0.2.9`，**已标 Latest**，正文 1,667 字 | ✅ |
+| 市场快照核对 + 正文白名单体检 | ✅ `node tools/verify-market-notes.mjs` |
+| **`npm publish`** | ❌ **被 2FA 拦下（EOTP），只差这一步** |
+
+**明天要做的事（按顺序）**
+
+1. 确认 npm 上还没有 0.2.9：`npm view dsh-vocab-study version --registry https://registry.npmjs.org`
+   —— 若已经是 0.2.9，说明已经发过了，跳到第 4 步。
+2. 拿凭据：<https://www.npmjs.com/settings/wt0812/tokens> 建 granular token，
+   只授权 `dsh-vocab-study` 的 **publish**，并勾上 **bypass 2FA**。
+3. 发布（**必须带 `--registry`，本地默认源是 npmmirror**）：
+
+   ```powershell
+   $env:TZ = "Asia/Shanghai"
+   npm publish --registry https://registry.npmjs.org
+   ```
+
+   返回 202 之后等约 2 分钟再 `npm view` 核对（上次就是这样，不会立刻可见）。
+4. 核对发布结果：`npm view dsh-vocab-study version` 应为 `0.2.9`，
+   并用 `python tools/verify-package.py`（若存在）或对比 npm 包内 `lib/client.js`
+   与仓库 `lib/client.js` 的 sha1，确认是同一份产物。
+5. **吊销那个 token**（用完立刻吊销，别留）。
+6. 发完当天市场弹窗还看不到细则（快照是每日的，且快照版本 ≤ 已装只显示提交记录）；
+   次日再用 `node tools/verify-market-notes.mjs` 复核一次，
+   期望看到 `⑥ 快照 tag = v0.2.9`。
+
+**注意**：用户本地的 `desktop` profile 是 `tools/install.py` 装的 **junction（`file:` 形态）**，
+内容和仓库一致（已核对 sha256），所以他已经能用到 0.2.9 的全部功能；
+npm 版本发不发不影响他本机，只影响市场用户能不能升级。
+
+---
+
 ## 1. 是否补发 npm 0.2.9 来体现「CI 修复」
 
 **已解决（2026-10-19）**：0.2.9 直接带着真功能（例句 + 词源）发了，
