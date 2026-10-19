@@ -7,7 +7,10 @@
 
 ## 1. 是否补发 npm 0.2.9 来体现「CI 修复」
 
-**现状（2026-10-19 核实）**
+**已解决（2026-10-19）**：0.2.9 直接带着真功能（例句 + 词源）发了，
+CI 修复顺带被覆盖，不需要为"只改版本号"单独发包。原决策记录如下，留作历史。
+
+**当时的现状（2026-10-19 核实）**
 
 - npm `latest = 0.2.8`，`lib/client.js` 3,359,253 B，与仓库 `main` 的产物 **哈希一致**。
 - 0.2.8 之后只有一个提交 `afbc1c2`（`fix(ci): 测试不再写死 +08:00`），
@@ -27,28 +30,19 @@
 
 ---
 
-## 2. 明天核对：市场「版本说明」弹窗是否已经显示 0.2.8
+## 2. 市场「版本说明」弹窗能不能看到我们的更新细则
 
-**背景**
+**已解决（2026-10-19 实测）**，结论比预期复杂，完整链路记在 `SHIPPING.md`
+的《更新说明》一节，复检工具是 `node tools/verify-market-notes.mjs`。
 
-市场弹窗的数据来自 `awesome-dsh-plugin.com/updates.json`（每日生成一次快照）。
-0.2.8 发布前，那份快照里我们的条目是 `release.tag = v0.2.0`、`checkedAt = 2026-10-18` ——
-根因是 GitHub 的 **Latest 标记一直停在 v0.2.0**（0.2.1~0.2.6 的 Release 建的时候没标 latest）。
+- 快照里**已经有我们**：`release.tag = v0.2.8`、正文 1,892 字。说明 `--latest` 修复有效。
+- 但上游有一道防重复说明的闸门：**快照版本 ≤ 用户已装版本时只显示提交记录**，
+  所以"刚发版当天看不到正文"是上游设计，不是我们没写好 Release。
+- `file:` / `link:` 形态（本仓库 `tools/install.py` 的 junction）直接返回 `none`，
+  弹窗永远显示「该插件未提供更新说明」——**验证弹窗必须用市场/npm 装的版本**。
 
-**已修**
-
-- `gh release edit v0.2.6 --latest`（先修历史）
-- 0.2.8 的 Release 用 `--latest` 创建，正文取自 `docs/releases/v0.2.8.md`
-- GitHub 的 `releases/latest` 现在返回 `v0.2.8`
-
-**待验证**
-
-- 拉 `https://awesome-dsh-plugin.com/updates.json`，看
-  `https://github.com/wt0812/dsh-vocab-study` 这条的 `release.tag` 是否变成 `v0.2.8`、
-  `checkedAt` 是否变成 `2026-10-19` 或之后。
-- 若还是 v0.2.0：说明每日生成读的不是 GitHub latest，要继续查
-  `dshmarket/lib/changelog.js` 那条降级链（`kind: release → commits → npm`）。
-- 本地还有 1 小时进程内缓存（`NOTES_TTL_MS = 60*60*1000`），核对前先完整重启 DSH。
+**当前状态**：0.2.9 的 Release 已标 Latest、正文 1,667 字、过了白名单体检；
+等次日快照推进到 `v0.2.9` 后，装着 0.2.8 的用户就能在弹窗里看到完整细则。
 
 ---
 

@@ -161,6 +161,52 @@ ORIGIN_UPDATES  = 'https://awesome-dsh-plugin.com/updates.json'
 > 因为弹窗根本读不到我们这条路 —— 市场没收录就没数据。
 > 等 PR 合并、次日 `updates.json` 重生成之后，才能看到弹窗里到底长什么样。
 
+### 合并之后：实测结果与「为什么有时候看不到细则」
+
+PR #7043 **已于 2026-10-17 合并**，次日快照就收录了我们（5945 条里能查到
+`https://github.com/wt0812/dsh-vocab-study`，`release.tag = v0.2.8`，正文 1,892 字）。
+也就是说：**Release 写好了，市场弹窗确实能读到。**
+
+但上游 `dshmarket/lib/changelog.js` 里有一道**不看代码猜不到**的闸门：
+
+```js
+// 快照是每日的，更新目标却实时读 npm —— 快照里的最新 Release 常常就是
+// 用户已装的那版。展示它等于解释一个用户已经拥有的变更（上游 issue #925）。
+const behind = installed !== null && released !== null && compareVersions(released, installed) <= 0;
+if (!(behind && (hasCommits || (specKey === null && npmName !== null)))) {
+    return { kind: 'release', release: entry.release };
+}
+```
+
+**后果（三种情况分开说）**：
+
+| 情况 | 弹窗显示 |
+|---|---|
+| 用户装着 0.2.8，快照已到 v0.2.9 | ✅ 「版本说明」+ **完整正文**（这就是要的效果） |
+| 用户装着 0.2.8，快照还是 v0.2.8（**发版当天**） | 「提交记录」圆点列表 —— 上游故意不显示，防重复说明 |
+| 用户已装 0.2.9，快照也是 v0.2.9（已是最新） | 「提交记录」—— 同上，不是 bug |
+
+还有一个**开发态特例**：`file:` / `link:` 形态的安装（本仓库 `tools/install.py`
+装的就是 junction = `file:`）在 `updateNotesFor()` 开头直接返回 `{ kind: 'none' }`
+→ 弹窗显示「该插件未提供更新说明」。所以**想验证弹窗，必须用市场/npm 装的版本，
+不能用开发态装的那份**。
+
+**验证工具**（2026-10-19 新增）：`node tools/verify-market-notes.mjs`
+
+它把上面的判定照源码复刻一遍，并核对 `dshmarket` 源码里五个关键标记是否还在
+（上游改逻辑会立刻报警，而不是继续输出旧结论）：
+
+```sh
+node tools/verify-market-notes.mjs                                             # 现状
+node tools/verify-market-notes.mjs --installed 0.2.8                           # 假设用户装着 0.2.8
+node tools/verify-market-notes.mjs --assume-snapshot v0.2.9 --installed 0.2.8  # 预览次日
+```
+
+同时它会对 `docs/releases/<tag>.md` 做**白名单格式体检**。2026-10-19 就靠它抓到一个真错：
+0.2.9 正文里引用了坏数据样本 `clip<t:cut…>`，而上游渲染第一步是**先剥 HTML**
+（不看 Markdown 结构）—— 尖括号会把那个词连同内容一起吃掉。
+**所以正文里连行内代码包着的尖括号都不许有**，这条已加进 `docs/releases/README.md`。
+
 **关于 `--profile`：这是最容易搞错的一处 —— 正确写法就是 `--profile web`。**
 
 DSH 按 profile 分目录装插件。`dsh plugin` 是命令行工具，它把后面的参数
