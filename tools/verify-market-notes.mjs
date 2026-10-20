@@ -278,6 +278,51 @@ try {
     console.log(`     · 查不到 npm 数据（${e && e.message ? e.message : e}），不影响其它结论`);
   }
 
+  // ── ⑧ 端到端：拿上游真实函数跑一次，别只信我复刻的逻辑 ────────
+  //
+  // ⑤ 只是核对"源码里的标记还在"，这里直接 **import 上游的 updateNotesFor()**
+  // 并造一个临时 profile（模拟某个已装版本），看它真实返回什么。
+  // 这是唯一能证明"市场用户点开弹窗会看到正文"的方式 —— 不是靠读代码推测。
+  console.log('');
+  console.log('  ⑧ 端到端（直接调上游 updateNotesFor）');
+  if (!up.found) {
+    console.log('     · 本机没装 dshmarket，跳过');
+  } else {
+    try {
+      const { pathToFileURL } = await import('node:url');
+      const mod = await import(pathToFileURL(up.file).href);
+      // 故意取"比快照旧一版"的用户来测：这正是刚发版后、用户该看到正文的情形
+      const snapVer = snapTag ? String(snapTag).replace(/^v/i, '') : repoVersion;
+      const pv = parseVer(snapVer);
+      const probeInstalled = pv ? `${pv[0]}.${pv[1]}.${Math.max(0, pv[2] - 1)}` : repoVersion;
+      const dir = join(tmpdir(), `vs-popup-probe-${probeInstalled}`);
+      mkdirSync(join(dir, 'node_modules', NPM_NAME), { recursive: true });
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'probe', dependencies: { [NPM_NAME]: probeInstalled } }));
+      writeFileSync(join(dir, 'node_modules', NPM_NAME, 'package.json'), JSON.stringify({ name: NPM_NAME, version: probeInstalled }));
+      const real = await mod.updateNotesFor('desktop', dir, NPM_NAME);
+      const body = String(real.release?.body ?? '');
+      console.log(`     模拟用户装 ${probeInstalled}（比快照 ${snapTag ?? '?'} 旧一版）→ kind=${real.kind}`);
+      if (real.kind === 'release') {
+        console.log(`     ✓ 上游真的把正文给了出来：tag=${real.release?.tag}，${body.length} 字符`);
+      } else if (real.kind === 'commits') {
+        console.log('     · 上游给了提交记录 —— 说明快照里还没有比该用户更新的 Release');
+      } else {
+        console.log(`     · 上游给了 kind=${real.kind}（不意外，但拿不到正文）`);
+      }
+      // 硬断言：快照比该用户新时，必须给正文
+      const cmp = compareVersions(snapVer, probeInstalled);
+      if (cmp !== null && cmp > 0 && real.kind !== 'release') {
+        console.log('     ✗ 断言失败：快照更新时上游却没给正文，这条链有 bug');
+        code = 1;
+      }
+      if (body.length > 0 && body.length < 300) {
+        console.log('     ⚠️ 正文短于 300 字符 —— 市场弹窗会显得空，检查 Release 正文');
+      }
+    } catch (e) {
+      console.log(`     · 调用失败（${e && e.message ? e.message : e}）—— 不影响其它结论`);
+    }
+  }
+
   console.log('');
   console.log('  ────────────────────────────────────────────────────────');
   console.log(`  结论：${code === 0 ? '链路正常 ✅' : '有需要处理的问题 ⚠️'}`);
