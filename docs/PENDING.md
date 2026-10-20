@@ -5,47 +5,43 @@
 
 ---
 
-## 0. 🔴【明天第一件事】npm 0.2.9 还没发出去
+## 0. ✅ npm 0.2.9 已发布（2026-10-20 完成）
 
-**2026-10-19 晚，用户说「先别搞了，留存我明天来」。**
+**2026-10-19 晚用户说「先别搞了，留存我明天来」，2026-10-20 上午发完并核对。**
 
-已经做完的部分（都验证过）：
-
-| 步骤 | 状态 |
+| 步骤 | 状态与证据 |
 |---|---|
 | 版本号 0.2.9（`package.json` / README） | ✅ |
 | `build-all` + 11 个测试套件（两个时区）全绿 | ✅ |
-| 提交 `64b8940` + 文档提交 `40c5a0d`，GitHub / Gitee 都推了 | ✅ |
+| 提交 `64b8940` + `40c5a0d` + `c5cf834`，GitHub / Gitee 都推了 | ✅ |
 | tag `v0.2.9`（两边都推了） | ✅ |
 | GitHub Release `v0.2.9`，**已标 Latest**，正文 1,667 字 | ✅ |
 | 市场快照核对 + 正文白名单体检 | ✅ `node tools/verify-market-notes.mjs` |
-| **`npm publish`** | ❌ **被 2FA 拦下（EOTP），只差这一步** |
+| `npm publish` | ✅ **已发布** |
 
-**明天要做的事（按顺序）**
+**发布核对结果（2026-10-20 09:35 实测）**
 
-1. 确认 npm 上还没有 0.2.9：`npm view dsh-vocab-study version --registry https://registry.npmjs.org`
-   —— 若已经是 0.2.9，说明已经发过了，跳到第 4 步。
-2. 拿凭据：<https://www.npmjs.com/settings/wt0812/tokens> 建 granular token，
-   只授权 `dsh-vocab-study` 的 **publish**，并勾上 **bypass 2FA**。
-3. 发布（**必须带 `--registry`，本地默认源是 npmmirror**）：
+- `npm view dsh-vocab-study version` → **0.2.9**
+- 线上 `dist.shasum` = `bdbfc77e63a5f6ab5cf6372f7627942c97bbb8c7`，与发布输出一致
+- 下载线上 tarball 解包，`lib/client.js` 的 SHA-256 **与仓库逐字节相同**（4,472 KB）
+- 包内含 `docs/third-party/README.md` + `ECDICT-LICENSE.txt` + `LICENSE`，
+  即 CC BY-SA 的署名材料确实随包发给了用户
+- `core/examples-data.mjs` / `core/etym-data.mjs` **不进包**（它们是构建期输入，
+  已内联进 `lib/client.js`），这是对的
 
-   ```powershell
-   $env:TZ = "Asia/Shanghai"
-   npm publish --registry https://registry.npmjs.org
-   ```
+**踩到的坑（下次照这个查）**
 
-   返回 202 之后等约 2 分钟再 `npm view` 核对（上次就是这样，不会立刻可见）。
-4. 核对发布结果：`npm view dsh-vocab-study version` 应为 `0.2.9`，
-   并用 `python tools/verify-package.py`（若存在）或对比 npm 包内 `lib/client.js`
-   与仓库 `lib/client.js` 的 sha1，确认是同一份产物。
-5. **吊销那个 token**（用完立刻吊销，别留）。
-6. 发完当天市场弹窗还看不到细则（快照是每日的，且快照版本 ≤ 已装只显示提交记录）；
-   次日再用 `node tools/verify-market-notes.mjs` 复核一次，
-   期望看到 `⑥ 快照 tag = v0.2.9`。
+- `npm publish` 报 **E404** 不代表包不存在 —— npm 对「token 没有这个包的写权限」统一回 404。
+  先用 `npm owner ls dsh-vocab-study --registry https://registry.npmjs.org` 验证 token
+  **能认证**（返回所有者就说明 token 有效），再看是不是权限只给了 Read。
+- `npm whoami` 对单包 granular token 返回 **401 是正常的**，不能据此判断 token 被吊销。
+
+**剩下的一件观察项**：市场快照（`updates.json`）每日重生成，等它把 `release.tag`
+推进到 `v0.2.9`，装着 0.2.8 的用户才能在弹窗里看到完整细则；
+用 `node tools/verify-market-notes.mjs --installed 0.2.8` 复核，看 ⑥ 是否为 `v0.2.9`。
 
 **注意**：用户本地的 `desktop` profile 是 `tools/install.py` 装的 **junction（`file:` 形态）**，
-内容和仓库一致（已核对 sha256），所以他已经能用到 0.2.9 的全部功能；
-npm 版本发不发不影响他本机，只影响市场用户能不能升级。
+内容和仓库一致（已核对 sha256），所以他已经能用到 0.2.9 的全部功能。
 
 ---
 

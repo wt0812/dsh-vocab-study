@@ -257,6 +257,27 @@ try {
   else if (snapTag === `v${repoVersion}`) console.log('     ✓ 快照已是最新版本');
   else if (snapTag !== null) console.log(`     · 快照比仓库还新（${snapTag}）—— 本地版本号是不是没推？`);
 
+  // ── ⑦ npm 上到底发了没有 ──────────────────────────────────────
+  // 市场「有新版本」这个提示读的是 npm **实时**数据，不是每日快照。
+  // 所以「发了 npm 但没建 Release」和「建了 Release 但没发 npm」两种漏法表现完全不同，
+  // 这一步把两件事分开核对。
+  console.log('');
+  console.log('  ⑦ npm 上的最新版本');
+  try {
+    const res = await fetch(`https://registry.npmjs.org/${NPM_NAME}/latest`, { signal: AbortSignal.timeout(60_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const latest = await res.json();
+    const cmp = compareVersions(latest.version, repoVersion);
+    console.log(`     npm latest = ${latest.version}   仓库 = ${repoVersion}`);
+    if (cmp === 0) console.log('     ✓ 已发布，装旧版的用户会看到"有新版本"提示');
+    else if (cmp !== null && cmp < 0) {
+      console.log('     ✗ npm 上还没有这版 —— 用户端收不到更新提示，市场也读不到这版说明');
+      code = 1;
+    } else console.log(`     · npm 上比仓库更新（${latest.version}）—— 本地是不是有未提交的版本回退？`);
+  } catch (e) {
+    console.log(`     · 查不到 npm 数据（${e && e.message ? e.message : e}），不影响其它结论`);
+  }
+
   console.log('');
   console.log('  ────────────────────────────────────────────────────────');
   console.log(`  结论：${code === 0 ? '链路正常 ✅' : '有需要处理的问题 ⚠️'}`);
