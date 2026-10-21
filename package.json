@@ -42,6 +42,7 @@
     "docs"
   ],
   "scripts": {
+    "prepack": "node tools/clean-pycache.mjs",
     "build": "python tools/build.py && python tools/build-plugin.py",
     "screenshots": "node tools/make-screenshots.mjs",
     "promo": "node tools/make-promo.mjs",
