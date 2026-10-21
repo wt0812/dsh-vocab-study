@@ -86,6 +86,11 @@ node tools/verify-market-entry.mjs <一个装了 js-yaml 的目录>
 ## 更新说明（市场上那个「更新内容」弹窗）—— 数据从哪来
 
 **结论：来自 `updates.json`，而 `updates.json` 来自市场主分支的目录条目。**
+
+> 📌 **时效（0.3.0 实测）**：快照**每日重生成**。发版当天跑
+> `node tools/verify-market-notes.mjs --assume-snapshot v0.3.0` 会显示
+> 「弹窗 → 版本说明 + Release 正文」是**对的**，但真实快照还停在上一版 ——
+> **次日起**用户装 0.2.9 才会在市场的「更新内容」里看到 0.3.0 的说明。
 所以 —— **没合并 = 弹窗里没有更新说明。跟 Release 写得好不好无关。**
 
 读的是 `dshmarket` 自己的代码（`src/changelog.ts`，`updateNotesFor()`）：
@@ -322,30 +327,64 @@ description:
 #    编辑 package.json 的 "version"
 
 # 2) 确认仓库干净、测试全绿、产物和提交一致
-git status --porcelain          # 应为空
-python tools/build.py           # 重新生成 demo/
-python tools/build-plugin.py    # 重新生成 lib/client.js
+git status --porcelain                    # 应为空
+python tools/build-all.py                 # demo/ + lib/client.js 一起重建
+node tools/count-assertions.mjs           # 12 个套件 / 断言数（现算）
+node tools/verify-headline-numbers.mjs    # 产物字节数与文档对得上
 git diff --quiet -- lib/ && echo "产物与提交一致"
-npm test                        # 8 个套件
 
-# 3) 两个远端都要推（GitHub + Gitee 镜像）
-git commit -am "release: v0.2.0"
-git push
-git push gitee main
+# 3) 提交（⚠️ 提交信息不要用 PowerShell 的 Set-Content 写：PS 5.1 会加 UTF-8 BOM，
+#    标题会变成 "﻿feat(...)" 这种带隐形字符的样子。用 python 写文件再 -F 提交。）
+git add -A
+git commit -F _commit.txt
 
-# 4) 打 tag（⚠️ 别忘了对齐 —— 见下方"已知不一致"）
-git tag v0.2.0
-git push origin v0.2.0
+# 4) 两个远端都要推（GitHub + Gitee 镜像），tag 也要两个都推
+git push origin main && git push gitee main
+git tag -a v0.3.0 -m "发布说明一句话"
+git push origin v0.3.0 && git push gitee v0.3.0
 
-# 5) 发 npm（必须带 --otp，账号开了 auth-and-writes 2FA）
-npm publish --registry=https://registry.npmjs.org/ --otp=<6位验证码>
+# 5) 发 npm（.npmrc 里的 token 现在能直接发，不用 --otp；真要验证码再加）
+npm publish --registry=https://registry.npmjs.org/ --access public
 
-# 6) 验证（不要只看 npm 打印的 + 就完事）
+# 6) 发 GitHub Release —— 市场「更新内容」弹窗读的就是这个正文
+gh release create v0.3.0 --title "..." --notes-file docs/releases/v0.3.0.md --latest
+
+# 7) 验证（不要只看 npm 打印的 + 就完事，见下方"暂存"那条）
 npm view dsh-vocab-study version --registry=https://registry.npmjs.org/
 npm view dsh-vocab-study version --registry=https://registry.npmmirror.com/
+node tools/verify-market-notes.mjs --offline --assume-snapshot v0.3.0 --installed <上一版>
 ```
 
-**GitHub Release**：`v0.2.0` 的 Release 也要发（带更新说明）。
+**GitHub Release**：`v0.3.0` 的 Release 也要发（带更新说明）—— 它同时是
+市场弹窗的正文来源，正文格式要先过 `tools/verify-market-notes.mjs`。
+
+### 发布实录：v0.3.0（2026-10-21）—— 三个坑
+
+1. **`npm publish` 打印 `+ 包@版本` 不等于已经上架。**
+   这版发出去后 registry 立刻查还是旧版本，`npm view @0.3.0` 报 404，持续约 **2 分钟**。
+   这时再发一次会得到 **409 `Cannot publish over previously staged version`** ——
+   这句话的真实意思是「上一次发布已经进暂存区、正在处理」，**不是失败、不要改版本号重发**。
+   正确做法：轮询 registry，等 `dist-tags.latest` 自己变成新版本。
+   （npm 打的那句 `Your package is being processed and may take a few minutes` 就是它。）
+
+2. **`files: ["tools"]` 会把 `tools/__pycache__` 打进包，`.npmignore` 拦不住。**
+   npm 的规则是「`files` 里点名的目录，`.npmignore` 排不掉」。0.3.0 的 tarball 里
+   因此带了一个 31 KB 的 `.pyc`（无害但不该有）。已在 `package.json` 加
+   `"prepack": "node tools/clean-pycache.mjs"`，从 0.3.1 起自动清掉。
+
+3. **发布前用 `new URL('..', import.meta.url).pathname` 取仓库根会踩空格。**
+   `DeepSeek Harness` 带空格 → pathname 是 `%20` 编码 → 目录打不开 →
+   清理脚本"成功"地什么也没清。用 `fileURLToPath` + `dirname`。
+
+**发布后必做的一条核对**：把发出去的包拉回来，比对产物哈希 ——
+
+```sh
+npm pack dsh-vocab-study@0.3.0 --registry=https://registry.npmjs.org/ --pack-destination <临时目录>
+# 解包后比对 package/lib/client.js 与本地 lib/client.js 的 SHA256
+```
+
+0.3.0 实测：发布包里的 `lib/client.js` 与本地**逐字节一致**（5,666,969 B，
+SHA256 `214DB28E…`），`SIMPLEWIKI-NOTICE.txt`、`docs/releases/v0.3.0.md` 也都在包里。
 
 ### 更新按钮的行为（写给未来的自己看）
 

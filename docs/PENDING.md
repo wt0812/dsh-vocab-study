@@ -20,6 +20,7 @@
 | 版本号 0.3.0（`package.json` / README / CHANGELOG / `docs/releases/v0.3.0.md`） | ✅ |
 | `build.py` + `build-plugin.py` 重建（`lib/client.js` 5,666,969 B ≈ 5.40 MB） | ✅ |
 | 12 个测试套件 × 两个时区（`Asia/Shanghai`、`UTC`） | ✅ 全绿（591 条断言） |
+| `npm publish` 到 0.3.0 | ✅ 2026-10-21（`latest=0.3.0`，98 文件 / 7.44 MB 解包；npmmirror 稍后同步） |
 | 四级离线词表 116 → 4,491（`tools/make-cet4-extra.mjs` + `core/seed-cet4-extra.mjs`） | ✅ |
 | 例句 **13,860 / 14,668 = 94.5%**（带中文 6,384 = 43.5%） | ✅ |
 | 词根词缀行 8,225（56.1%）/ 词源 12,109（82.6%）/ 搭配 **5,095（34.7%）**/ 同族词 6,346（43.3%） | ✅ |
@@ -27,7 +28,7 @@
 | 真界面验证：`expose` 卡片有「常见搭配」 | ✅ 截图 `_verify/card-colloc.png` |
 | 真界面验证：`whisper/whisker` 卡片只有英文例句、不编中文、无「✨ 生成」按钮 | ✅ 截图 `_verify/card-enonly.png` |
 | 文案体检 `node tools/verify-market-notes.mjs`（Release 正文格式） | ✅ 1,394 字，无表格/分隔线/HTML |
-| 提交 + tag `v0.3.0` + GitHub / Gitee 推送 + Release 标 Latest | 未做（等放行） |
+| 提交 + tag `v0.3.0` + GitHub / Gitee 推送 + Release 标 Latest | ✅ 2026-10-21（`5bd4b53`，发布说明 1,890 字符） |
 | `npm publish`（0.3.0） | 未做（等放行） |
 
 **放行之后照抄 0.2.9 的流程**（§0 里那张表），注意两点：
