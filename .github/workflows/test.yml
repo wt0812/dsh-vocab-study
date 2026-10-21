@@ -58,9 +58,11 @@ jobs:
           fi
           echo "✓ 产物可复现，与提交一致"
 
-      - name: 十一个测试套件
+      - name: 全部测试套件（见 package.json 的 test 脚本）
         run: npm test
 
+      # 这个自检脚本自己也会坏（2026-10-21：它误报，CI 连红三天）。
+      # 判据和屏蔽器现在都只有一份实现：tools/lib/dangling.py。
       - name: 构建期守卫：命名空间清单漏项
         run: node tools/verify-dangling-guard.mjs
 

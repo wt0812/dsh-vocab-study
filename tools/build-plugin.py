@@ -34,6 +34,11 @@ ROOT = os.path.dirname(HERE)
 PKG = os.path.basename(ROOT)
 PKG_ID = "dsh-vocab-study"
 
+# 「代码/非代码」分离器只有一份实现（tools/lib/dangling.py），验证脚本
+# tools/verify-dangling-guard.mjs 也调它 —— 两边判据必须一致，不能再各写一份。
+sys.path.insert(0, os.path.join(HERE, "lib"))
+from dangling import mask_non_code  # noqa: E402
+
 # 每个 core 文件对外暴露的符号。摊平后这些都会变成作用域里的裸声明，
 # 所以这张表既是「命名空间重组」的依据，也是「漏导出」的检查依据。
 # 改动 core 的导出时，这里必须同步 —— 不同步会在构建期报错，不会拖到运行时。
@@ -222,61 +227,10 @@ def strip_import_export(src, externals):
     return "\n".join(ext_lines), src
 
 
-def mask_strings_and_comments(src):
-    """把字符串/模板串/注释换成等长空格（保留换行与偏移）。
-
-    为什么需要：悬空命名空间检查用的是文本正则，它会把**数据里**的文本当代码。
-    真实踩到：例句数据里有一条 `A.I. won't reach singularity.`，检查器看到一个
-    `A.I` 就判定"产物里残留了命名空间 A 的成员 I"，于是构建失败 —— 纯误报。
-
-    换成等长空格，行号和偏移都不变，报错信息依然准。
-    **不要**把这个函数用到 top_level_decls：全局屏蔽会把正则字面量里的引号
-    当成字符串开头，吞掉后面大段源码，反而更危险（这一条试过，回滚了）。
-    """
-    out = list(src)
-    i, n = 0, len(src)
-    while i < n:
-        ch = src[i]
-        nxt = src[i + 1] if i + 1 < n else ""
-        if ch == "/" and nxt == "/":
-            while i < n and src[i] != "\n":
-                out[i] = " "
-                i += 1
-            continue
-        if ch == "/" and nxt == "*":
-            out[i] = out[i + 1] = " "
-            i += 2
-            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
-                if src[i] != "\n":
-                    out[i] = " "
-                i += 1
-            if i < n:
-                out[i] = " "
-                out[i + 1] = " "
-                i += 2
-            continue
-        if ch in "\"'`":
-            quote = ch
-            out[i] = " "
-            i += 1
-            while i < n:
-                c = src[i]
-                if c == "\\":
-                    out[i] = " "
-                    if i + 1 < n and src[i + 1] != "\n":
-                        out[i + 1] = " "
-                    i += 2
-                    continue
-                if c == quote:
-                    out[i] = " "
-                    i += 1
-                    break
-                if c != "\n":
-                    out[i] = " "
-                i += 1
-            continue
-        i += 1
-    return "".join(out)
+# mask_strings_and_comments() 已迁移到 tools/lib/dangling.py（函数名 mask_non_code）。
+# 迁移原因：旧实现不认正则字面量，`/^[a-z][a-z'-]*$/` 里那个 `'` 会被当成字符串开头，
+# 一口气吞掉 2,700 多字符的代码 —— 检查器于是「少报」，明明是悬空引用也放过。
+# 唯一实现由本文件与 tools/verify-dangling-guard.mjs 共用，两边判据不会再漂。
 
 
 def top_level_decls(src):
@@ -602,8 +556,8 @@ def main():
     # 事故经过：加了「再来 5 个新词」用到 shouldBlockNew，忘了登记，7 个测试
     # 套件全绿（测试直接 import core/app.mjs，不经打包器），真机上黑屏。
     ns_prefixes = sorted({key.split(".")[0] for key in ns_table})
-    # 只看**代码**部分：字符串/注释里的文本会误报（见 mask_strings_and_comments）
-    scan_body = mask_strings_and_comments(body)
+    # 只看**代码**部分：字符串/注释里的文本会误报（见 tools/lib/dangling.py 的 mask_non_code）
+    scan_body = mask_non_code(body)
     dangling = []
     for m in re.finditer(r"\b(%s)\.([A-Za-z_$][\w$]*)" % "|".join(ns_prefixes), scan_body):
         full = m.group(1) + "." + m.group(2)

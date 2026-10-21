@@ -63,5 +63,25 @@ if os.path.isfile(client):
     else:
         print('\n✓ 新鲜度自检通过：lib/client.js 不比 %d 个源文件旧' % len(sources))
 
+# 悬空命名空间前缀守卫的**自检**也要在这里跑。
+# 为什么加在 build-all 而不是只放 CI：2026-10-21 的教训 —— 这个自检脚本
+# （tools/verify-dangling-guard.mjs）自己坏了（误报），而本机从不跑它，
+# 于是 CI 从 0.3.0 起连红三天没人发现。本机每次打包前跑一遍，就不会再"只靠 CI"。
+if ok:
+    print('\n── 守卫自检（verify-dangling-guard）──────────────')
+    try:
+        r = subprocess.run(['node', os.path.join(HERE, 'verify-dangling-guard.mjs')],
+                           cwd=ROOT, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', shell=(os.name == 'nt'))
+        for l in [x for x in (r.stdout or '').splitlines() if x.strip()][-4:]:
+            print('   ' + l)
+        if r.returncode != 0:
+            print('   ❌ 守卫自检失败（exit %d）' % r.returncode)
+            ok = False
+        else:
+            print('   ✓ 守卫自检通过')
+    except FileNotFoundError:
+        print('   ⚠ 找不到 node，跳过守卫自检（CI 里一定会跑）')
+
 print('\n%s' % ('✅ 双构建完成' if ok else '❌ 有失败项'))
 sys.exit(0 if ok else 1)
