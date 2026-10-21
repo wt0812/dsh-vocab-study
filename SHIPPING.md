@@ -349,6 +349,12 @@ npm publish --registry=https://registry.npmjs.org/ --access public
 # 6) 发 GitHub Release —— 市场「更新内容」弹窗读的就是这个正文
 gh release create v0.3.0 --title "..." --notes-file docs/releases/v0.3.0.md --latest
 
+# 6b) 发 Gitee 发行版（Gitee 是国内镜像，发行版要单独建）
+#     令牌只走环境变量，不落盘、不进 git 历史
+$env:GITEE_TOKEN = "<Gitee 私人令牌，勾 projects 权限>"
+python tools/make-gitee-release.py --dry-run     # 先干跑
+python tools/make-gitee-release.py
+
 # 7) 验证（不要只看 npm 打印的 + 就完事，见下方"暂存"那条）
 npm view dsh-vocab-study version --registry=https://registry.npmjs.org/
 npm view dsh-vocab-study version --registry=https://registry.npmmirror.com/
@@ -358,7 +364,7 @@ node tools/verify-market-notes.mjs --offline --assume-snapshot v0.3.0 --installe
 **GitHub Release**：`v0.3.0` 的 Release 也要发（带更新说明）—— 它同时是
 市场弹窗的正文来源，正文格式要先过 `tools/verify-market-notes.mjs`。
 
-### 发布实录：v0.3.0（2026-10-21）—— 三个坑
+### 发布实录：v0.3.0（2026-10-21）—— 四个坑
 
 1. **`npm publish` 打印 `+ 包@版本` 不等于已经上架。**
    这版发出去后 registry 立刻查还是旧版本，`npm view @0.3.0` 报 404，持续约 **2 分钟**。
@@ -372,7 +378,16 @@ node tools/verify-market-notes.mjs --offline --assume-snapshot v0.3.0 --installe
    因此带了一个 31 KB 的 `.pyc`（无害但不该有）。已在 `package.json` 加
    `"prepack": "node tools/clean-pycache.mjs"`，从 0.3.1 起自动清掉。
 
-3. **发布前用 `new URL('..', import.meta.url).pathname` 取仓库根会踩空格。**
+3. **Gitee 的「发行版」只能通过 API 建，而 API 只认私人令牌、不认登录密码。**
+   机器上 `git credential fill` 取到的是 Gitee **登录密码**（9 位），拿去调
+   `/api/v5/repos/.../releases` 会返回 `401 Access token does not exist`。
+   要在 https://gitee.com/profile/personal_access_tokens 建一个勾 `projects` 的令牌，
+   用 `GITEE_TOKEN` 环境变量传给 `tools/make-gitee-release.py`。
+   0.3.0 实测：令牌读列表、建发行版都正常，页面
+   `https://gitee.com/wutong2005/dsh-vocab-study/releases/tag/v0.3.0` 可访问、
+   标题与正文（1,890 字符）都在。**用完建议立刻撤销该令牌**（它等于写权限）。
+
+4. **发布前用 `new URL('..', import.meta.url).pathname` 取仓库根会踩空格。**
    `DeepSeek Harness` 带空格 → pathname 是 `%20` 编码 → 目录打不开 →
    清理脚本"成功"地什么也没清。用 `fileURLToPath` + `dirname`。
 
