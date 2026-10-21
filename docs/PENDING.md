@@ -5,10 +5,10 @@
 
 ---
 
-## 0.1 ⏳ 0.3.0 待发布（本地已验完，等用户放行）
+## 0.1 ✅ 0.3.0 已发布（2026-10-21，全平台）
 
-**2026-10-20 的三件事 + 用户追问「不够」后的一轮自查，全部落地并验证。按流程
-「先本地验证 → 用户点头 → 才打包上传」，现在卡在等点头。**
+**2026-10-21 16:08 全平台发完：GitHub（Release 标 Latest）+ Gitee（发行版）
++ npm（latest=0.3.0）。只剩两件要等外部的，见本表末尾。**
 
 用户看到旧数字后追问「这点解决就够了吗，不够」——对，不够。自查又量出三个真问题并修了：
 ① 搭配排序 bug（`vote for` 234 次输给 `vote by` 8 次）② 相邻统计挖不到
@@ -20,7 +20,7 @@
 | 版本号 0.3.0（`package.json` / README / CHANGELOG / `docs/releases/v0.3.0.md`） | ✅ |
 | `build.py` + `build-plugin.py` 重建（`lib/client.js` 5,666,969 B ≈ 5.40 MB） | ✅ |
 | 12 个测试套件 × 两个时区（`Asia/Shanghai`、`UTC`） | ✅ 全绿（591 条断言） |
-| `npm publish` 到 0.3.0 | ✅ 2026-10-21（`latest=0.3.0`，98 文件 / 7.44 MB 解包；npmmirror 稍后同步） |
+| `npm publish` 到 0.3.0 | ✅ 2026-10-21（`latest=0.3.0`，98 文件 / 7.44 MB 解包） |
 | 四级离线词表 116 → 4,491（`tools/make-cet4-extra.mjs` + `core/seed-cet4-extra.mjs`） | ✅ |
 | 例句 **13,860 / 14,668 = 94.5%**（带中文 6,384 = 43.5%） | ✅ |
 | 词根词缀行 8,225（56.1%）/ 词源 12,109（82.6%）/ 搭配 **5,095（34.7%）**/ 同族词 6,346（43.3%） | ✅ |
@@ -28,13 +28,20 @@
 | 真界面验证：`expose` 卡片有「常见搭配」 | ✅ 截图 `_verify/card-colloc.png` |
 | 真界面验证：`whisper/whisker` 卡片只有英文例句、不编中文、无「✨ 生成」按钮 | ✅ 截图 `_verify/card-enonly.png` |
 | 文案体检 `node tools/verify-market-notes.mjs`（Release 正文格式） | ✅ 1,394 字，无表格/分隔线/HTML |
-| 提交 + tag `v0.3.0` + GitHub / Gitee 推送 + Release 标 Latest | ✅ 2026-10-21（`5bd4b53`，发布说明 1,890 字符） |
-| `npm publish`（0.3.0） | 未做（等放行） |
+| 提交 + tag `v0.3.0` + GitHub / Gitee 推送 + Release 标 Latest | ✅ 2026-10-21（发布说明 1,890 字符） |
+| Gitee 发行版（API，`tools/make-gitee-release.py`） | ✅ 2026-10-21（id 1225649，正文同一份） |
+| 发布包核对：拉回 tarball 比对 `lib/client.js` 哈希 | ✅ 逐字节一致（5,666,969 B） |
+| ⏳ 市场「更新内容」弹窗显示 0.3.0 | **等上游每日快照**。今天（10-21）快照里我们这条是 `v0.2.9`（正文 1,627 字符，`checkedAt=2026-10-21`），所以要等下一次重生成 |
+| ⏳ npmmirror 国内镜像同步到 0.3.0 | 仍然 `0.2.9`。已手动催 `POST npmmirror.com/sync/dsh-vocab-study` 两次、并直接拉 `@0.3.0`，都没动 —— 镜像侧按需/定时同步，只能等 |
+| ⚠️ 已发布的 0.3.0 tarball 里带一个 31 KB `tools/__pycache__/*.pyc` | 无害（不进运行路径）。`files:["tools"]` 让 `.npmignore` 排不掉；已加 `prepack` 清理，0.3.1 起自动解决。已发布版本改不了 |
 
-**放行之后照抄 0.2.9 的流程**（§0 里那张表），注意两点：
-1. `npm publish` 必须显式带 `--registry https://registry.npmjs.org`（本机 registry 是 npmmirror）。
-2. 市场快照是**每日**重生成的，发完当天弹窗里还看不到正文，次日 `updates.json` 推进到
-   `v0.3.0` 后装着 0.2.9 的用户才能看到；复检用 `node tools/verify-market-notes.mjs --installed 0.2.9`。
+**发完之后只剩等外部，别重复动作**：
+1. 市场快照**每日**重生成，现在 `updates.json` 我们这条是 `v0.2.9`。复检用
+   `node tools/verify-market-notes.mjs --installed 0.2.9`（**别加 `--offline`** ——
+   本地缓存是 10-19 的旧数据，会让结论错一天，这次就踩了）。
+2. npmmirror 同步无 API 可推（`/-/package/*/syncs` 是 404），只能等它自己跟上。
+3. Gitee 发行版走 `GITEE_TOKEN` 环境变量 + `tools/make-gitee-release.py`；
+   注意 git 凭据管理器里存的是**登录密码**（9 位），Gitee API 不认（401），必须要私人令牌。
 
 **这一轮又踩到三个「数据看着对、其实错」的坑，都记在这里：**
 1. **`list-words.mjs` 合并词条时不合并释义** —— 词性是从释义里的 `n.` / `vt.` 标记推出来的
