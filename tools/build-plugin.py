@@ -45,6 +45,8 @@ CORE_EXPORTS = [
             "pairsNeedingDrill", "activePairs", "blacklistedPartners", "similarity",
             "ERROR_KIND", "classifyError", "diagnosis", "pickDistractors"]),
     ("SEED", ["SEED_CET4_RAW", "SEED_COLLECTIONS"]),
+    # 四级词表补全部分（见 tools/make-cet4-extra.mjs）。手写 116 词之外的考纲词。
+    ("C4X", ["SEED_CET4_EXTRA_RAW"]),
     # 各考纲词库的内置词表（生成产物，见 tools/make-seeds.mjs）。
     # ⚠️ 这个注册表有**两份**：这里和 tools/build.py 的 CORE_EXPORTS。
     # 一次只改一份的话，另一条构建路径会报
@@ -58,9 +60,18 @@ CORE_EXPORTS = [
     # 都是生成产物：tools/make-examples.py / tools/make-etym.py。
     # **必须排在 RT 前面**：roots.mjs 的 examplesOf / originOf 要查它们。
     ("EXD", ["EXAMPLES", "EXAMPLES_COVERAGE"]),
+    # Wikipedia 补的例句（CC BY-SA 4.0）：Tatoeba 里一次都没出现的词靠它。
+    # 和 EXAMPLES 同形（[英文句]），但没有中文译文；roots.mjs 的 examplesOf 会回退查它。
+    ("EXWD", ["EXAMPLES_WIKI", "EXAMPLES_WIKI_COVERAGE"]),
     ("ETD", ["ETYM", "ETYM_COVERAGE"]),
+    # 词形派生关系（WordNet 3.0，见 tools/make-wordnet-relatives.py）。
+    # 「同族词」的第二来源：ECDICT 词根家族覆盖不到的那 4,000+ 词靠它。
+    ("WND", ["WN_DERIVATION", "WN_COVERAGE"]),
+    # 常见搭配数据表（同样来自 Tatoeba，CC BY 2.0）：tools/make-collocations.py 生成。
+    # 也必须排在 RT 前面 —— roots.mjs 的 collocationsOf 要查它。
+    ("CLD", ["COLLOCATIONS", "COLLOC_COVERAGE"]),
     ("RT", ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine",
-           "examplesOf", "originOf"]),
+           "examplesOf", "originOf", "collocationsOf"]),
     ("L", ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
            "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
            "contextSentence", "lookupWord", "familyOf", "SEED_CET4"]),
@@ -85,9 +96,10 @@ CORE_EXPORTS = [
 
 # core-ref 注册表的键名（全名，界面层读的是这个）
 CORE_NS_KEY = {
-    "M": "memory", "MK": "mistake", "SEED": "seed", "SEEDX": "seedExams",
+    "M": "memory", "MK": "mistake", "SEED": "seed", "C4X": "seedCet4Extra", "SEEDX": "seedExams",
     "RTD": "rootsData", "RT": "roots",
-    "EXD": "examplesData", "ETD": "etymData",
+    "EXD": "examplesData", "EXWD": "examplesWikiData", "ETD": "etymData",
+    "CLD": "collocData", "WND": "wordnetData",
     "L": "library", "SP": "speech", "HK": "hook",
     "Q": "queue", "G": "game", "B": "beckon", "S": "session", "A": "app",
 }
@@ -97,6 +109,8 @@ CORE_ORDER = [
     "core/memory.mjs",
     "core/mistake.mjs",
     "core/seed-cet4.mjs",
+    # 四级词表补全部分。同样必须在 library.mjs 前。
+    "core/seed-cet4-extra.mjs",
     # 各考纲词库的内置词表（生成产物）。**必须在 library.mjs 前** ——
     # 摊平顺序就是依赖顺序，library.mjs 要用它的常量。
     "core/seed-exams.mjs",
@@ -105,7 +119,11 @@ CORE_ORDER = [
     "core/roots-data.mjs",
     # 例句 / 词源数据表（生成产物）。同样必须在 roots.mjs 之前。
     "core/examples-data.mjs",
+    # Wikipedia 补的例句。同样必须在 roots.mjs 之前（examplesOf 要回退查它）。
+    "core/examples-wiki-data.mjs",
     "core/etym-data.mjs",
+    "core/colloc-data.mjs",
+    "core/wordnet-data.mjs",
     "core/roots.mjs",
     "core/library.mjs",
     "core/speech.mjs",
@@ -134,7 +152,7 @@ CORE_GET_SHORT_KEY_RE = re.compile(
 NS_KEY_FOR_SHORT = {
     "M": "memory", "MK": "mistake", "G": "game", "Q": "queue",
     "L": "library", "B": "beckon", "SP": "speech", "S": "session", "A": "app",
-    "SEED": "seed", "SEEDX": "seedExams", "HK": "hook",
+    "SEED": "seed", "C4X": "seedCet4Extra", "SEEDX": "seedExams", "HK": "hook",
 }
 
 
@@ -202,6 +220,63 @@ def strip_import_export(src, externals):
     # export function / export const / export async function → 去掉 export
     src = re.sub(r"^(\s*)export\s+(async\s+)?(function|const|let|var|class)\s", r"\1\2\3 ", src, flags=re.M)
     return "\n".join(ext_lines), src
+
+
+def mask_strings_and_comments(src):
+    """把字符串/模板串/注释换成等长空格（保留换行与偏移）。
+
+    为什么需要：悬空命名空间检查用的是文本正则，它会把**数据里**的文本当代码。
+    真实踩到：例句数据里有一条 `A.I. won't reach singularity.`，检查器看到一个
+    `A.I` 就判定"产物里残留了命名空间 A 的成员 I"，于是构建失败 —— 纯误报。
+
+    换成等长空格，行号和偏移都不变，报错信息依然准。
+    **不要**把这个函数用到 top_level_decls：全局屏蔽会把正则字面量里的引号
+    当成字符串开头，吞掉后面大段源码，反而更危险（这一条试过，回滚了）。
+    """
+    out = list(src)
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        nxt = src[i + 1] if i + 1 < n else ""
+        if ch == "/" and nxt == "/":
+            while i < n and src[i] != "\n":
+                out[i] = " "
+                i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            out[i] = out[i + 1] = " "
+            i += 2
+            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
+                if src[i] != "\n":
+                    out[i] = " "
+                i += 1
+            if i < n:
+                out[i] = " "
+                out[i + 1] = " "
+                i += 2
+            continue
+        if ch in "\"'`":
+            quote = ch
+            out[i] = " "
+            i += 1
+            while i < n:
+                c = src[i]
+                if c == "\\":
+                    out[i] = " "
+                    if i + 1 < n and src[i + 1] != "\n":
+                        out[i + 1] = " "
+                    i += 2
+                    continue
+                if c == quote:
+                    out[i] = " "
+                    i += 1
+                    break
+                if c != "\n":
+                    out[i] = " "
+                i += 1
+            continue
+        i += 1
+    return "".join(out)
 
 
 def top_level_decls(src):
@@ -527,11 +602,13 @@ def main():
     # 事故经过：加了「再来 5 个新词」用到 shouldBlockNew，忘了登记，7 个测试
     # 套件全绿（测试直接 import core/app.mjs，不经打包器），真机上黑屏。
     ns_prefixes = sorted({key.split(".")[0] for key in ns_table})
+    # 只看**代码**部分：字符串/注释里的文本会误报（见 mask_strings_and_comments）
+    scan_body = mask_strings_and_comments(body)
     dangling = []
-    for m in re.finditer(r"\b(%s)\.([A-Za-z_$][\w$]*)" % "|".join(ns_prefixes), body):
+    for m in re.finditer(r"\b(%s)\.([A-Za-z_$][\w$]*)" % "|".join(ns_prefixes), scan_body):
         full = m.group(1) + "." + m.group(2)
         if full not in ns_table:
-            line_no = body[: m.start()].count("\n") + 1
+            line_no = scan_body[: m.start()].count("\n") + 1
             dangling.append((full, line_no))
     if dangling:
         uniq = sorted({d[0] for d in dangling})

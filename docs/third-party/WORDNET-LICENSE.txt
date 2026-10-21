@@ -1,0 +1,42 @@
+WordNet Release 3.0
+
+This software and database is being provided to you, the LICENSEE, by
+Princeton University under the following license.
+
+By obtaining, using and/or copying this software and database, you agree
+that you have read, understood, and will comply with these terms and
+conditions.:
+
+Permission to use, copy, modify and distribute this software and database
+and its documentation for any purpose and without fee or royalty is hereby
+granted, provided that you agree to comply with the following copyright
+notice and statements, including the disclaimer, and that the same appear
+on ALL copies of the software, database and documentation, including
+modifications that you make for internal use or for distribution.
+
+WordNet 3.0 Copyright 2006 by Princeton University. All rights reserved.
+
+THIS SOFTWARE AND DATABASE IS PROVIDED "AS IS" AND PRINCETON UNIVERSITY
+MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED. BY WAY OF
+EXAMPLE, BUT NOT LIMITATION, PRINCETON UNIVERSITY MAKES NO REPRESENTATIONS
+OR WARRANTIES OF MERCHANT-ABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR
+THAT THE USE OF THE LICENSED SOFTWARE, DATABASE OR DOCUMENTATION WILL NOT
+INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS, TRADEMARKS OR OTHER RIGHTS.
+
+The name of Princeton University or Princeton may not be used in
+advertising or publicity pertaining to distribution of the software and/or
+database. Title to copyright in this software, database and any associated
+documentation shall at all times remain with Princeton University and
+LICENSEE agrees to preserve same.
+
+─────────────────────────────────────────────────────────────────────────
+说明（本仓库添加，不属于许可证正文）
+
+上面是 WordNet 3.0 许可证的权威文本，取自 SPDX 许可证清单
+<https://spdx.org/licenses/WordNet.html>（SPDX short identifier: `WordNet`）。
+Princeton 官网的 license 页面已经下线（403），SPDX 收录的这份是标准副本。
+
+对我们的意义：允许商用、允许修改和再分发，唯一的实质条件是
+「保留这段版权声明和免责声明」。它**不是** share-alike，不会传染我们的
+MIT 代码；但 `core/wordnet-data.mjs` 里带着 WordNet 派生出来的关系数据，
+所以分发时这个文件必须一起跟着走。

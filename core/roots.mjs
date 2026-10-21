@@ -10,7 +10,12 @@ import { ROOT_FAMILIES, WORD_ROOTS, MORPH_TABLE, WORD_MORPH } from './roots-data
 // 例句（Tatoeba，CC BY 2.0）与词源（Wiktionary，CC BY-SA 4.0）都是**生成产物**，
 // 见 tools/make-examples.py / tools/make-etym.py。这一层只查，不生成。
 import { EXAMPLES } from './examples-data.mjs';
+import { EXAMPLES_WIKI } from './examples-wiki-data.mjs';
 import { ETYM } from './etym-data.mjs';
+// 常见搭配（Tatoeba 语料按「闭类词结构」统计，生成产物）。
+// 见 tools/make-collocations.py：只收 词+介词 / be+形容词+介词 / 动词+小品词 /
+// 形容词+名词 / 名词+of+名词 这几种语法上几乎不会凑错的结构。
+import { COLLOCATIONS } from './colloc-data.mjs';
 
 // 注意：这里**不**转出 ROOTS_COVERAGE。
 // 摊平进同一作用域后，RSD 和 RT 各声明一个同名常量就是 SyntaxError（构建期会拦）。
@@ -25,7 +30,10 @@ import { ETYM } from './etym-data.mjs';
 export function examplesOf(word) {
   const key = String(word ?? '').trim().toLowerCase();
   if (!key) return null;
-  const hit = EXAMPLES[key];
+  // 先查 Tatoeba（有中文译文）；没有再回退到 Wikipedia 单语例句。
+  // 回退条目只有一句英文（数组长度 1）—— 界面在缺译文时不画译文行，
+  // 因为**编一句中文就是假数据**。
+  const hit = EXAMPLES[key] || EXAMPLES_WIKI[key];
   return Array.isArray(hit) ? hit : null;
 }
 
@@ -42,11 +50,36 @@ export function examplesOf(word) {
 export function originOf(word) {
   const key = String(word ?? '').trim().toLowerCase();
   if (!key) return null;
-  const hit = ETYM[key];
+  // 词源表的键有首字母大写的（Africa / April / Roman）—— 词库里存的是原样写法，
+  // 只查小写会让这批词在界面上"没有词源"，而其实数据就在表里（实测漏 81 个词）。
+  const cap = key.charAt(0).toUpperCase() + key.slice(1);
+  const hit = ETYM[key] || ETYM[cap];
   if (!Array.isArray(hit) || hit.length < 2) return null;
   return { kind: hit[0], text: hit[1] };
 }
 
+
+/**
+ * 查这个词的常见搭配 → `string[]`，没有就是空数组（界面上整块不出现）。
+ *
+ * 数据不是词典里的「标准搭配」，而是语料里**稳定出现**的结构化组合，
+ * 每个组合在 200 万句英文里至少出现 4~5 次，且满足下面之一：
+ *   词+介词（consult with） / be+形容词+介词（be responsible for）
+ *   动词+小品词（give up）    / 形容词+名词（abrupt end）
+ *   名词+of+名词（abolition of slavery） / 动词+冠词+名词（consult a doctor）
+ *
+ * 为什么不用「相邻词频」：那样会挖出 better consult / fish is 这种垃圾
+ * （实测精确率只有六成）。结构受限之后，介词和小品词都是封闭集合，
+ * 语言上几乎不可能凑错。
+ */
+export function collocationsOf(word) {
+  const key = String(word ?? '').trim().toLowerCase();
+  if (!key) return [];
+  const hit = COLLOCATIONS[key];
+  // 返回副本：卡片渲染层拿到的是同一个数组引用的话，
+  // 任何 push/sort 都会改坏数据表（测试里就是这么抓到过一次）。
+  return Array.isArray(hit) ? hit.slice() : [];
+}
 
 /** 把词规整成查表用的键（数据表里全是小写）。 */
 function rootKeyOf(word) {
@@ -137,8 +170,10 @@ export function decompose(word) {
   return parts.length ? parts.join(' · ') : null;
 }
 
+import { WN_DERIVATION } from './wordnet-data.mjs';
+
 /**
- * 同族词：和这个词共享至少一个词根的其他词（**都在我们词库里**）。
+ * 同族词：和这个词共享至少一个词根（或词形派生关系）的其他词（**都在我们词库里**）。
  *
  * 为什么要它：词根拆解只能告诉用户「tract = 拉」，
  * 但真正帮助记忆的是「你认识的 attract / contract / distract 也是这一家」——
@@ -151,11 +186,10 @@ export function decompose(word) {
  */
 export function relativesOf(word) {
   const key = rootKeyOf(word);
-  const idx = rootFamilyIndices(key);
-  if (!idx.length) return [];
   const seen = new Set([key]);
   const out = [];
-  for (const i of idx) {
+  // ① 词根家族（ECDICT）：共享词根，所以带 root —— 界面标题写「同族词 · tract」。
+  for (const i of rootFamilyIndices(key)) {
     const f = ROOT_FAMILIES[i - 1];
     if (!f || !Array.isArray(f.family)) continue;
     for (const member of f.family) {
@@ -163,6 +197,15 @@ export function relativesOf(word) {
       seen.add(member);
       out.push({ word: member, root: f.key, kind: f.kind });
     }
+  }
+  // ② 词形派生（WordNet）：attract → attraction / attractive。
+  //    这类词不一定共享词根（attraction 在我们的拆解表里没有），
+  //    但「同一个词根的另一个词形」是词典里标好的事实，比空着强得多。
+  //    放最后：家族那批带 root，界面标题优先用它。
+  for (const member of WN_DERIVATION[key] || []) {
+    if (seen.has(member)) continue;
+    seen.add(member);
+    out.push({ word: member, root: null, kind: 'derivation' });
   }
   return out;
 }

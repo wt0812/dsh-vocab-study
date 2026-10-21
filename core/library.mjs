@@ -5,10 +5,16 @@
 // 「重试 3 次后才降级，且是部分降级：已拉到的批次照常可用，不因后续失败而全量作废」。
 
 import { SEED_CET4_RAW, SEED_COLLECTIONS } from './seed-cet4.mjs';
+import { SEED_CET4_EXTRA_RAW } from './seed-cet4-extra.mjs';
 import { SEED_CET6, SEED_KAOYAN, SEED_TOEFL, SEED_GRE, SEED_IELTS } from './seed-exams.mjs';
-import { decompose, relativesOf, examplesOf, originOf } from './roots.mjs';
+import { decompose, relativesOf, examplesOf, originOf, collocationsOf } from './roots.mjs';
 
-export const SEED_CET4 = SEED_CET4_RAW;
+// 四级词表 = 手写的 116 个词（带人工例句/译文/搭配/词根）+ 考纲补全的 4,375 个词。
+// 手写的在前：parseWordlist 按顺序去重，重复的词保留下手写那条。
+// 为什么必须补：四级离线词表原来只有手写那 116 个词，agree / arrive / hear /
+// spend 这些最基础的四级词**根本不在词表里** —— 用户看到的是「这个词没有例句」，
+// 真相是「这个词不存在」。远程词表能补，但断网时就只剩 116 个词。
+export const SEED_CET4 = [...SEED_CET4_RAW, ...SEED_CET4_EXTRA_RAW];
 export const COLLECTIONS = SEED_COLLECTIONS;
 
 export const FIRST_CHUNK = 20; // 首批 20 词到达即开始学习，不阻塞首卡
@@ -91,7 +97,8 @@ export function parseWordlist(raw, collection = 'cet4', startSeq = 0) {
       meaning: r.meaning || r.trans || r.zh || '',
       example: r.example || r.ex || (tatoeba ? tatoeba[0] : null),
       exampleZh: r.exampleZh || (tatoeba ? tatoeba[1] : null),
-      collocations: r.collocations || [],
+      // 常见搭配：四级那 116 个手写词优先；其余问语料统计表（10.5% 的词有）。
+      collocations: r.collocations?.length ? r.collocations : withColloc(word),
       roots: r.roots || withRoots(word),
       etym: r.etym ?? withEtym(word),
       synonyms: r.synonyms || [],
@@ -113,6 +120,20 @@ function withExample(word) {
     return examplesOf(word);
   } catch {
     return null;
+  }
+}
+
+/**
+ * 常见搭配补充（语料统计）：`string[]`，查不到就是空数组。
+ *
+ * 这是 0.3.0 之前最大的空洞：只有四级那 116 个手写词有搭配（0.4%），
+ * 其余 14000 多个词的卡片上根本没有「常见搭配」这一块。
+ */
+function withColloc(word) {
+  try {
+    return collocationsOf(word);
+  } catch {
+    return [];
   }
 }
 
@@ -232,9 +253,28 @@ function parseTextLine(l) {
 }
 
 function guessPos(meaning = '') {
-  const m = String(meaning).match(/(^|\s)(n|v|a|ad|adj|adv|prep|conj|pron|num|int)\./);
-  return m ? `${m[2]}.` : '';
+  // 从释义开头的词性标记猜词性。补全的四级词表用的是考纲写法（`vt.` / `vi.` /
+  // `a.` / `ad.`），原来只认 n / v / a / ad / adj / adv，于是 707 个词的
+  // pos 全是空 —— 界面上词性行空着，「每个词都有词性」自检也会红。
+  //
+  // 还有几个源文件自己就不干净，只能放宽匹配、不能编词性：
+  //   · `n 自行车` / `prep 在…之中`   —— 漏了句点
+  //   · `ini.嗨`                     —— 想写 int.
+  //   · `(缩作 OK)a.&ad.对`          —— 前面有括号，a. 后面跟 &
+  //   · `\uF05D n.闪电`              —— 行首带了个私用区字符（源文件的项目符号）
+  const text = String(meaning).replace(/[\uE000-\uF8FF\uFFFD]/g, ' ');
+  const m = text.match(
+    /(^|[\s()])(n|v|vt|vi|a|ad|adj|adv|prep|conj|pron|num|int|ini|art|aux)(?:\.|\s|&|$)/,
+  );
+  if (!m) return '';
+  const MAP = {
+    vt: 'v.', vi: 'v.', v: 'v.', adj: 'adj.', a: 'a.', adv: 'adv.', ad: 'ad.',
+    ini: 'int.',
+  };
+  return MAP[m[2]] || `${m[2]}.`;
 }
+
+
 
 /**
  * 加载一个词库。返回 { words, source, offline, partial, failedBatches }。
@@ -354,7 +394,7 @@ function dedupeById(list) {
  *  从公开词表生成）。取不到远程源时退到这里，词是真的，只是数量少。
  */
 const SEED_BY_COLLECTION = {
-  cet4: SEED_CET4_RAW,
+  cet4: SEED_CET4,
   cet6: SEED_CET6,
   kaoyan: SEED_KAOYAN,
   ielts: SEED_IELTS,
@@ -381,6 +421,11 @@ export function seedFor(collection = 'cet4') {
       const tatoeba = w.example ? null : withExample(w.word);
       return {
         ...w,
+          // 补全的四级词条（seed-cet4-extra）只有 [单词, 音标, 释义] 三元组，没有 pos 字段。
+          // 以前只有手写词、pos 是显式写了的，所以没人发现；扩表后 4,375 个词的 pos
+          // 全是 undefined —— 界面上词性行空着，「种子词条字段完整」自检也会红。
+          // 用和 parseWordlist 同一个 guessPos 兜底，保证两条数据入口字段形状一致。
+          pos: w.pos || guessPos(w.meaning),
         // ⚠️ roots 必须在这里补，不能只补在 parseWordlist 里。
         // 这是**真实踩过的坑**：种子词库这条路不走 parseWordlist，
         // 只在那边补的话，界面上「词根词源」折叠项对 5406 个六级词
@@ -397,6 +442,7 @@ export function seedFor(collection = 'cet4') {
         example: w.example ?? (tatoeba ? tatoeba[0] : null),
         exampleZh: w.exampleZh ?? (tatoeba ? tatoeba[1] : null),
         etym: w.etym ?? withEtym(w.word),
+        collocations: w.collocations?.length ? w.collocations : withColloc(w.word),
         id: `${collection}:${w.word}`,
         collection: w.collection || collection,
       };

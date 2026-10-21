@@ -9,6 +9,7 @@
 // 只在 parseWordlist 里补数据的话，单测全绿但界面一个词根都不显示。
 
 import * as RT from '../core/roots.mjs';
+import { WN_COVERAGE } from '../core/wordnet-data.mjs';
 import * as L from '../core/library.mjs';
 import { ROOT_FAMILIES, WORD_ROOTS, MORPH_TABLE, WORD_MORPH, ROOTS_COVERAGE } from '../core/roots-data.mjs';
 import { SEED_CET4_RAW } from '../core/seed-cet4.mjs';
@@ -224,7 +225,37 @@ const relAbs = RT.relativesOf('abstract');
 push('abstract 有同族词', relAbs.length > 0, `${relAbs.length} 个`);
 push('同族词里不含自己', relAbs.every((r) => r.word !== 'abstract'));
 push('同族词都在词库里', relAbs.every((r) => LIB_WORDS.has(r.word)));
-push('同族词都带 root / kind', relAbs.every((r) => r.root && r.kind));
+// 同族词有**两个来源**，形状要分开守：
+//  · 词根家族（ECDICT）：带 root，界面标题写「同族词 · tract」
+//  · 词形派生（WordNet）：没有共享词根，root 是 null，靠 kind='derivation' 区分
+// 一开始这里写的是 `r.root && r.kind`，接了第二来源就必然红 —— 不是回归，
+// 是这条断言的前提变了（它守的是「没有来路不明的条目」，不是「必须来自词根家族」）。
+push('同族词都带 kind', relAbs.every((r) => r.kind));
+push('同族词要么带 root（词根家族），要么是词形派生',
+  relAbs.every((r) => Boolean(r.root) || r.kind === 'derivation'));
+
+// ── 词形派生这条来源本身 ──
+// 注意选词：attract / decide 的派生词（attraction、decision）**同时**属于
+// ECDICT 的 tract / cid 词根家族，所以它们会以「词根家族」身份出现（带 root）。
+// 要单独验证 WordNet 这条来源，得选那些**没有词根家族**的词 —— 那才是它补的位。
+const relHappy = RT.relativesOf('happy');
+push('happy 的同族词包含 happiness（WordNet 派生，且不来自词根家族）',
+  relHappy.some((r) => r.word === 'happiness' && r.kind === 'derivation'),
+  relHappy.map((r) => `${r.word}/${r.kind}`).join(','));
+push('派生来源的条目 root 是 null（不编词根）',
+  relHappy.filter((r) => r.kind === 'derivation').every((r) => r.root === null));
+push('invite 的同族词包含 invitation（WordNet 派生）',
+  (RT.relativesOf('invite') || []).some((r) => r.word === 'invitation'));
+push('词形派生不收纯屈折（happen / carry / move 的同族词里不许出现 happens / carried / moving）',
+  ['happen', 'carry', 'move'].every((w) => {
+    const rel = new Set((RT.relativesOf(w) || []).map((r) => r.word));
+    return !rel.has(w + 's') && !rel.has(w + 'ed') && !rel.has(w + 'ing');
+  }));
+push('WN_COVERAGE 覆盖闸门（≥25% 词表）',
+  WN_COVERAGE.wordsWithDerivation / WN_COVERAGE.words >= 0.25,
+  `${WN_COVERAGE.wordsWithDerivation}/${WN_COVERAGE.words}`);
+push('两个来源合并后同族词覆盖 ≥35%',
+  (() => { let n = 0; for (const w of LIB_WORDS) if ((RT.relativesOf(w) || []).length) n++; return n / LIB_WORDS.size >= 0.35; })());
 push('abstract 的同族词包含 attract（真实同根词）', relAbs.some((r) => r.word === 'attract'), relAbs.slice(0, 6).map((r) => r.word).join(','));
 
 const famAbs = L.familyOf('abstract', 5);
@@ -267,16 +298,25 @@ push('seedFor 补的 roots 与 decompose 一致', seededRooted.every((w) => w.ro
 // (c) 种子文件里显式的 roots: null 不许盖掉自动拆解
 //     这是第二个坑：seed-cet4 的工厂函数给每条都写了 roots: extra.root ?? null，
 //     把 roots 写在 spread 前面会被覆盖回 null（实测 cet4 只剩 43 条）。
+// ⚠️ cet4 现在 = 手写 116 词 + 考纲补全 4,375 词。这两条断言测的是「手写词的
+//    roots: null 不许盖掉自动拆解」，所以分母必须限定在手写那批 —— 拿全量当分母，
+//    补全词（本来就靠自动拆解）会把回归淹掉。
 const seededCet4 = L.seedFor('cet4');
-const cet4Rooted = seededCet4.filter((w) => w.roots);
+const HAND4 = new Set(SEED_CET4_RAW.map((w) => String(w.word).toLowerCase()));
+const handCet4 = seededCet4.filter((w) => HAND4.has(String(w.word).toLowerCase()));
+const cet4Rooted = handCet4.filter((w) => w.roots);
 push(
-  'seedFor(cet4) 的自动拆解没被种子里的 roots:null 盖掉（应 > 70 条）',
+  'seedFor(cet4) 的自动拆解没被种子里的 roots:null 盖掉（手写词里应 > 70 条）',
   cet4Rooted.length > 70,
-  `${cet4Rooted.length} / ${seededCet4.length}`,
+  `${cet4Rooted.length} / ${handCet4.length}`,
 );
 push(
   'seedFor(cet4) 手写 roots 仍然优先（43 条带人工「→」画面）',
   cet4Rooted.filter((w) => String(w.roots).includes('→')).length === 43,
+);
+push(
+  '补全的四级词也吃到自动拆解（不是只塞了单词）',
+  seededCet4.filter((w) => !HAND4.has(String(w.word).toLowerCase()) && w.roots).length > 1500,
 );
 push(
   'seedFor 的每个词都保留了 word / meaning / id / collection',
@@ -292,7 +332,9 @@ push('parseWordlist 里手写 roots 优先于自动拆解', String(handParsed[0]
 
 // (e) 六个词库的覆盖规模（数字写死，改了数据要一起改，防止悄悄退化）
 // 2026-10：加了手写构词法表后这批数字从 86/1611/1459/1411/2097/2039 涨上来的。
-const EXPECT = { cet4: 104, cet6: 2740, kaoyan: 2263, ielts: 2294, toefl: 3867, gre: 3567 };
+// 2026-10（0.3.0）：cet4 补全了 4,375 个考纲词，cet4 的词根条数从 104 跳到 1,854；
+// 其余词库因词根表重算有小幅变化。
+const EXPECT = { cet4: 1856, cet6: 2752, kaoyan: 2274, ielts: 2365, toefl: 3885, gre: 3577 };
 for (const [c, expect] of Object.entries(EXPECT)) {
   const s = L.seedFor(c);
   const got = s.filter((w) => w.roots).length;

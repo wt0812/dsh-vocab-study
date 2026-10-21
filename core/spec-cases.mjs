@@ -335,7 +335,9 @@ export const SPEC_CASES = [
     run(api, t) {
       const seed = L.seedFor('cet4');
       t.check(seed.length > 100, `内置种子词库可用（${seed.length} 词）`);
-      t.check(seed.every((w) => w.word && w.ipa && w.meaning), '种子词条字段完整');
+      // ipa 不再要求非空：四级补全词表里 `a` / `an` 这类功能词源文件就没给音标，
+// 硬要求非空只有两种做法——编一个音标，或者把它们丢掉。都错。
+t.check(seed.every((w) => w.word && typeof w.ipa === 'string' && w.meaning), '种子词条字段完整');
       t.check(L.isPureEnglish('abandon') === true, '纯英文可收藏');
       t.check(L.isPureEnglish('这是一个词') === false, '中文不触发收藏');
 

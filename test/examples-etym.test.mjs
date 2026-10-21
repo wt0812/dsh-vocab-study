@@ -14,7 +14,9 @@
 
 import * as RT from '../core/roots.mjs';
 import * as L from '../core/library.mjs';
+import { SEED_CET4_RAW } from '../core/seed-cet4.mjs';
 import { EXAMPLES, EXAMPLES_COVERAGE } from '../core/examples-data.mjs';
+import { EXAMPLES_WIKI, EXAMPLES_WIKI_COVERAGE } from '../core/examples-wiki-data.mjs';
 import { ETYM, ETYM_COVERAGE } from '../core/etym-data.mjs';
 
 const GREEN = '\x1b[32m';
@@ -72,7 +74,13 @@ let tokenOk = true;
 let tokenBad = '';
 for (const k of exKeys) {
   const v = EXAMPLES[k];
-  if (!Array.isArray(v) || v.length !== 2 || !v[0] || !v[1]) {
+  // 译文允许 null：语料里没配对译文时**只给英文**，绝不给假翻译。
+  if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'string' || !v[0]) {
+    shapeOk = false;
+    shapeBad = k;
+    break;
+  }
+  if (v[1] !== null && (typeof v[1] !== 'string' || !v[1])) {
     shapeOk = false;
     shapeBad = k;
     break;
@@ -89,6 +97,7 @@ for (const k of exKeys) {
     sentenceBad = `${k}: 没有句末标点 — ${en}`;
     break;
   }
+  if (zh === null) continue;
   if (!HAN.test(zh) || zh.length > 40) {
     zhOk = false;
     zhBad = `${k}: ${zh}`;
@@ -108,14 +117,45 @@ for (const k of exKeys) {
     break;
   }
 }
-push('每条都是 [英文, 中文] 两个非空字符串', shapeOk, shapeBad);
+push('每条都是 [英文, 中文或 null]（英文必须非空）', shapeOk, shapeBad);
 push('每条英文都是 3–14 词的完整句子（有句末标点）', sentenceOk, sentenceBad);
-push('每条中文都像中文（含汉字、≤40 字）', zhOk, zhBad);
+push('有译文的那部分，中文像中文（含汉字、≤40 字）', zhOk, zhBad);
 push('中文全部是简体（繁体残留 = 0）', tradOk, tradBad);
+
+// 台版用词：生成器用的是 OpenCC 的 tw2sp（台版繁体→简体，带地区词替换），
+// 不是 t2s。t2s 只换字形，"義大利" → "義大利" 还是台版叫法 —— 用户实测抓到过
+// 「Italian → 我是义大利人」，大陆写「意大利」。
+const TW_WORDS = ['义大利', '软体', '网路', '记忆体', '脚踏车', '计程车', '萤幕', '硬碟', '程式', '泡面'];
+let twOk = true;
+let twBad = '';
+for (const k of exKeys) {
+  const zh = EXAMPLES[k][1];
+  if (!zh) continue;
+  const hit = TW_WORDS.find((w) => zh.includes(w));
+  if (hit) {
+    twOk = false;
+    twBad = `${k}: ${hit} — ${zh}`;
+    break;
+  }
+}
+push('译文里没有台版用词（义大利 / 软体 / 网路 …）', twOk, twBad);
+
+// 译文允许为 null，但声明数字必须和实际一致
+const zhCount = exKeys.filter((k) => EXAMPLES[k][1] !== null).length;
+push(
+  'EXAMPLES_COVERAGE.withZh 与实际一致',
+  EXAMPLES_COVERAGE.withZh === zhCount,
+  `实际 ${zhCount} / 声明 ${EXAMPLES_COVERAGE.withZh}`,
+);
+push(
+  '英文单语通道确实在工作（存在 null 译文的条目）',
+  zhCount < exKeys.length,
+  `null 译文 ${exKeys.length - zhCount} 条`,
+);
 push('每条英文例句里真有这个词本身', tokenOk, tokenBad);
 push(
-  '覆盖率不低于 40%（低于就是数据塌了）',
-  exKeys.length / EXAMPLES_COVERAGE.words >= 0.4,
+  '覆盖率不低于 85%（现在实测 91.6%，掉下来就是数据塌了）',
+  exKeys.length / EXAMPLES_COVERAGE.words >= 0.85,
   `${exKeys.length}/${EXAMPLES_COVERAGE.words} = ${((exKeys.length / EXAMPLES_COVERAGE.words) * 100).toFixed(1)}%`,
 );
 
@@ -125,6 +165,79 @@ push(
   '例句重复率 < 5%',
   uniqSentences.size / exKeys.length > 0.95,
   `${exKeys.length - uniqSentences.size} 条重复`,
+);
+
+// ══ ①-b Wikipedia 补的例句 ═════════════════════════════════════
+// 这是「例句」的第二来源：Tatoeba 里一次都没出现的词，从 Simple English
+// Wikipedia 里捞一句真句子。**只有英文，没有译文** —— 语料里没有配对，
+// 编一句中文就是假数据。
+console.log('\n①-b Wikipedia 补的例句（CC BY-SA 4.0）');
+
+const wkKeys = Object.keys(EXAMPLES_WIKI);
+push('EXAMPLES_WIKI 非空（Tatoeba 挖不到的词确实补上了）', wkKeys.length > 0, `${wkKeys.length} 词`);
+
+let wkShapeOk = true;
+let wkShapeBad = '';
+let wkSentOk = true;
+let wkSentBad = '';
+let wkNoneInTat = true;
+let wkNoneBad = '';
+let wkTokenOk = true;
+let wkTokenBad = '';
+for (const k of wkKeys) {
+  const v = EXAMPLES_WIKI[k];
+  // 形状：只有一句英文（长度 1），没有中文占位
+  if (!Array.isArray(v) || v.length !== 1 || typeof v[0] !== 'string' || !v[0]) {
+    wkShapeOk = false;
+    wkShapeBad = k;
+    break;
+  }
+  const en = v[0];
+  // 和 Tatoeba 那份同一个排版约束：3~14 词、≤100 字符、有句末标点
+  if (wordCount(en) < 3 || wordCount(en) > 14 || en.length > 100 || !/[.!?]$/.test(en.trim())) {
+    wkSentOk = false;
+    wkSentBad = `${k}: ${en}`;
+    break;
+  }
+  // 不许出现汉字（这一份没有译文，混进汉字就是串了）
+  if (HAN.test(en)) {
+    wkSentOk = false;
+    wkSentBad = `${k}: 中文混进英文例句 — ${en}`;
+    break;
+  }
+  // 只补 Tatoeba 没有的词：已有的词绝不能被覆盖（覆盖 = 丢掉译文）
+  if (EXAMPLES[k]) {
+    wkNoneInTat = false;
+    wkNoneBad = k;
+    break;
+  }
+  // 例句里必须真有这个词（允许复数/词尾变化）
+  const norm = (x) => x.toLowerCase().replace(/^[’']+|[’']+$/g, '');
+  const toks = (en.match(WORD_RE) || []).map(norm);
+  const infl = ['s', 'es', 'ed', 'd', 'ing'];
+  const hitIt = toks.some((t) => t === k || (t.startsWith(k) && infl.includes(t.slice(k.length))));
+  if (!hitIt) {
+    wkTokenOk = false;
+    wkTokenBad = `${k}: ${en}`;
+    break;
+  }
+}
+push('每条都是 [英文句]（只有英文，没有假译文）', wkShapeOk, wkShapeBad);
+push('每条英文都是 3–14 词的完整句子，且不含汉字', wkSentOk, wkSentBad);
+push('只补 Tatoeba 没有的词（绝不覆盖已有译文）', wkNoneInTat, wkNoneBad);
+push('每条英文里真有这个词本身（允许词尾变化）', wkTokenOk, wkTokenBad);
+push(
+  'EXAMPLES_WIKI_COVERAGE.words 与实际一致',
+  EXAMPLES_WIKI_COVERAGE.words === wkKeys.length,
+  `实际 ${wkKeys.length} / 声明 ${EXAMPLES_WIKI_COVERAGE.words}`,
+);
+// 查询层必须真的回退到它：随便拿一个 wiki 独有的词，examplesOf 要返回那句英文
+const wkProbe = wkKeys[0];
+const wkHit = RT.examplesOf(wkProbe);
+push(
+  `查询层回退到 Wikipedia 例句（${wkProbe}）`,
+  Array.isArray(wkHit) && wkHit[0] === EXAMPLES_WIKI[wkProbe][0],
+  JSON.stringify(wkHit),
 );
 
 // ══ ② 词源数据表自洽 ═══════════════════════════════════════════
@@ -228,10 +341,18 @@ push(
 );
 
 // cet4 精编那 116 词人工写过例句，**不能被语料覆盖**
-const cet4WithEx = L.seedFor('cet4').filter((w) => w.example);
-push('cet4 人工例句仍然在', cet4WithEx.length >= 100, `${cet4WithEx.length} 词`);
+//
+// ⚠️ 0.3.0 起 cet4 不再只有 116 个手写词：离线词表补了 4,375 个考纲词，
+//    它们的例句来自 Tatoeba 语料、有些没有中文译文（exampleZh = null，界面不显示中文）。
+//    所以「人工例句/人工译文」这两条断言必须只看手写那批 —— 否则测的还是补全词，
+//    真正的回归（手写例句被语料覆盖）反而测不出来。
+const HAND4 = new Set(SEED_CET4_RAW.map((w) => String(w.word).toLowerCase()));
+const cet4WithEx = L.seedFor('cet4').filter(
+  (w) => HAND4.has(String(w.word).toLowerCase()) && w.example,
+);
+push('cet4 手写例句仍然在（116 词里满编）', cet4WithEx.length >= 100, `${cet4WithEx.length} / ${HAND4.size} 词`);
 push(
-  'cet4 人工例句没有被告成英文（exampleZh 都在）',
+  'cet4 手写例句的中文译文都在（exampleZh 非空）',
   cet4WithEx.every((w) => typeof w.exampleZh === 'string' && w.exampleZh.length > 0),
 );
 

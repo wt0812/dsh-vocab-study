@@ -90,6 +90,9 @@ CORE_ORDER = [
     ("M", "core/memory.mjs"),
     ("MK", "core/mistake.mjs"),
     ("SEED", "core/seed-cet4.mjs"),
+    # 四级词表补全部分（生成产物，见 tools/make-cet4-extra.mjs）：
+    # 手写那 116 个词之外的四级考纲词，同样必须在 library.mjs 前面。
+    ("C4X", "core/seed-cet4-extra.mjs"),
     # 各考纲词库的内置词表（生成的，见 tools/make-seeds.mjs）。
     # **必须排在 library.mjs 前面** —— 顺序就是依赖顺序，L 要用它的常量。
     ("SEEDX", "core/seed-exams.mjs"),
@@ -100,7 +103,13 @@ CORE_ORDER = [
     # 都是生成产物（tools/make-examples.py / tools/make-etym.py）。
     # **必须排在 RT 前面**：roots.mjs 的 examplesOf / originOf 要查它们。
     ("EXD", "core/examples-data.mjs"),
+    # Wikipedia 补的例句（CC BY-SA 4.0），见 tools/make-examples-wiki.py。
+    ("EXWD", "core/examples-wiki-data.mjs"),
     ("ETD", "core/etym-data.mjs"),
+    # 词形派生关系（WordNet 3.0）：同族词第二来源，生成脚本
+    # tools/make-wordnet-relatives.py。同样必须排在 RT 前面。
+    ("WND", "core/wordnet-data.mjs"),
+    ("CLD", "core/colloc-data.mjs"),
     ("RT", "core/roots.mjs"),
     ("L", "core/library.mjs"),
     ("SP", "core/speech.mjs"),
@@ -121,6 +130,7 @@ CORE_EXPORTS = {
            "pairsNeedingDrill", "activePairs", "blacklistedPartners", "similarity",
            "ERROR_KIND", "classifyError", "diagnosis", "pickDistractors"],
     "SEED": ["SEED_CET4_RAW", "SEED_COLLECTIONS"],
+    "C4X": ["SEED_CET4_EXTRA_RAW"],
     # 各考纲词库的内置词表（生成产物）。library.mjs 从它取值，
     # 摊平后是同一个作用域里的顶层绑定，所以这里必须登记，
     # 否则 L 里的 `SEED_CET6` 会变成未定义 → 整包加载就报 ReferenceError。
@@ -128,9 +138,12 @@ CORE_EXPORTS = {
               "SEED_EXAM_COUNTS"],
     "RTD": ["ROOT_FAMILIES", "WORD_ROOTS", "MORPH_TABLE", "WORD_MORPH", "ROOTS_COVERAGE"],
     "EXD": ["EXAMPLES", "EXAMPLES_COVERAGE"],
+    "EXWD": ["EXAMPLES_WIKI", "EXAMPLES_WIKI_COVERAGE"],
     "ETD": ["ETYM", "ETYM_COVERAGE"],
+    "WND": ["WN_DERIVATION", "WN_COVERAGE"],
+    "CLD": ["COLLOCATIONS", "COLLOC_COVERAGE"],
     "RT": ["decompose", "morphOf", "relativesOf", "rootFamiliesOf", "rootLine",
-           "examplesOf", "originOf"],
+           "examplesOf", "originOf", "collocationsOf"],
     "L": ["COLLECTIONS", "SOURCES", "FIRST_CHUNK", "parseWordlist", "loadCollection",
           "seedFor", "seedMemories", "extractWordsFromText", "isPureEnglish",
           "contextSentence", "lookupWord", "familyOf", "SEED_CET4"],
@@ -617,7 +630,8 @@ window.__vsCoreSelfTest = function () {
 
   // ⑯ 词库降级：拉取失败要有种子库顶上，且不阻塞（§4.2）
   ok(L.seedFor('cet4').length > 100, '内置种子词库可用（' + L.seedFor('cet4').length + ' 词）');
-  ok(L.seedFor('cet4').every((w) => w.word && w.ipa && w.meaning), '种子词条字段完整');
+  // ipa 允许为空：四级补全词表里 `a` / `an` 这类功能词源文件就没给音标
+ok(L.seedFor('cet4').every((w) => w.word && typeof w.ipa === 'string' && w.meaning), '种子词条字段完整');
   ok(L.isPureEnglish('abandon') === true, '纯英文可收藏');
   ok(L.isPureEnglish('这是一个词') === false, '中文不触发收藏');
 

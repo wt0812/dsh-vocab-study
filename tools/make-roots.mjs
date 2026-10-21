@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { SEED_CET4_RAW, SEED_COLLECTIONS } from '../core/seed-cet4.mjs';
+import { SEED_CET4_EXTRA_RAW } from '../core/seed-cet4-extra.mjs';
 import { SEED_CET6, SEED_KAOYAN, SEED_TOEFL, SEED_GRE, SEED_IELTS } from '../core/seed-exams.mjs';
 import { PREFIXES, SUFFIXES, ROOTS, KNOWN_BASE } from './morph-table.mjs';
 
@@ -85,7 +86,9 @@ function rootShortMeaning(meaning) {
 // ── 我们词库里的词（本次覆盖率的分母）────────────────────────────
 const COLLECTION_ORDER = SEED_COLLECTIONS ? Object.keys(SEED_COLLECTIONS) : ['cet4', 'cet6', 'kaoyan', 'ielts', 'toefl', 'gre'];
 const SEED_LIST = {
-  cet4: SEED_CET4_RAW.map((w) => w.word),
+  // 四级 = 手写 116 词 + 考纲补全（否则补全进来的 4,375 个词不参与词根匹配，
+  // 覆盖率分母也会少掉一大块）
+  cet4: [...SEED_CET4_RAW.map((w) => w.word), ...SEED_CET4_EXTRA_RAW.map((r) => r[0])],
   cet6: SEED_CET6.map((r) => r[0]),
   kaoyan: SEED_KAOYAN.map((r) => r[0]),
   ielts: SEED_IELTS.map((r) => r[0]),
@@ -413,6 +416,38 @@ for (const word of [...WORD_LIBS.keys()].sort((a, b) => a.localeCompare(b, 'en')
   if (!rI) statAffixOnly++;
   WORD_MORPH_ENTRIES.push([word, pI, rI, sI]);
 }
+// ── 词形还原继承 ─────────────────────────────────────────────────
+// 词表里收了不少**变形条目**（animals / contracts / governments / activities）。
+// 它们自己切不出词缀，但原形有拆解 —— 复数、过去式继承原形的词根是**事实**，
+// 不是推断。所以只做这一条，而且原形必须**已经在词表里、已经有拆解**。
+//
+// 明确拒绝的做法：拿词根在词里"随便出现"当依据。实测 52 个候选里
+// africa←fric(摩擦)、winter←inter、momentum←ment(心智) 全错，会往用户脑子里
+// 塞假词源 —— 宁可覆盖低，也不做这种事。
+const morphIdxByWord = new Map(WORD_MORPH_ENTRIES.map(([w, pI, rI, sI]) => [w, [pI, rI, sI]]));
+let statInflect = 0;
+function inflectionBases(word) {
+  const out = [];
+  if (word.endsWith('ies')) out.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith('es')) out.push(word.slice(0, -2));
+  if (word.endsWith('s') && !/(ss|us|is)$/.test(word)) out.push(word.slice(0, -1));
+  if (word.endsWith('ied')) out.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith('ed')) { out.push(word.slice(0, -2)); out.push(word.slice(0, -1)); }
+  if (word.endsWith('ing')) { out.push(word.slice(0, -3)); out.push(`${word.slice(0, -3)}e`); }
+  if (/([bdgklmnprt])\1(ed|ing)$/.test(word)) out.push(word.replace(/([bdgklmnprt])\1(ed|ing)$/, '$1'));
+  return out.filter((b) => b.length >= 3 && b !== word && morphIdxByWord.has(b));
+}
+for (const word of [...WORD_LIBS.keys()].sort((a, b) => a.localeCompare(b, 'en'))) {
+  if (morphIdxByWord.has(word)) continue;
+  if ((wordToFamilies.get(word) || []).length) continue; // ECDICT 已给了同族词，不重复
+  const base = inflectionBases(word)[0];
+  if (!base) continue;
+  const idx = morphIdxByWord.get(base);
+  WORD_MORPH_ENTRIES.push([word, ...idx]);
+  morphIdxByWord.set(word, idx);
+  statInflect++;
+}
+
 const morphCovered = WORD_MORPH_ENTRIES.length;
 
 // ── 审计报告 ─────────────────────────────────────────────────────
@@ -446,6 +481,7 @@ if (AUDIT_ONLY) {
   console.log(`  带后缀            ${statSuffix}`);
   console.log(`  手写表补的词根    ${statTableRoot}`);
   console.log(`  只有词缀没词根    ${statAffixOnly}`);
+  console.log(`  词形继承（复数/过去式）${statInflect}`);
   console.log(`  合并后总覆盖      ${new Set([...WORD_ROOTS_ENTRIES.map(([w]) => w), ...WORD_MORPH_ENTRIES.map(([w]) => w)]).size}  = ${pct(new Set([...WORD_ROOTS_ENTRIES.map(([w]) => w), ...WORD_MORPH_ENTRIES.map(([w]) => w)]).size)}`);
   console.log(`  压缩表条目        ${MORPH_TABLE.length}`);
   console.log('');
@@ -554,6 +590,7 @@ lines.push(`export const ROOTS_COVERAGE = ${JSON.stringify(
     suffixCount: statSuffix,
     tableRootCount: statTableRoot,
     affixOnlyCount: statAffixOnly,
+    inflectInherited: statInflect,
     combinedCovered: new Set([...WORD_ROOTS_ENTRIES.map(([w]) => w), ...WORD_MORPH_ENTRIES.map(([w]) => w)]).size,
     source: 'ECDICT wordroot.txt (MIT) + tools/morph-table.mjs (手写标准构词法表)',
   },

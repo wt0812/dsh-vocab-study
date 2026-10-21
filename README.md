@@ -35,10 +35,10 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 项 | 说明 |
 |---|---|
-| 版本 | `0.2.9`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
-| 成熟度 | 功能可用、**在真界面里逐条点过**；8 套件 / 400 条断言全绿（详见[测试](#测试)） |
+| 版本 | `0.3.0`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
+| 成熟度 | 功能可用、**在真界面里逐条点过**；12 套件 / **591** 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
-| 体积 | `lib/client.js` 4,578,922 B ≈ **4.37 MB**（内含六本词库共 **29,841** 词，见[为什么这么大](#构建)） |
+| 体积 | `lib/client.js` 5,666,969 B ≈ **5.40 MB**（内含六本词库共 **34,216** 词，见[为什么这么大](#构建)） |
 | 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
 | 国内镜像 | [gitee.com/wutong2005/dsh-vocab-study](https://gitee.com/wutong2005/dsh-vocab-study)（**与 GitHub 逐提交一致**，见下） |
 | 市场收录 | 已提 PR [awesome-dsh-plugin#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043)，**等上游合并** |
@@ -48,8 +48,8 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 GitHub 在国内时常连不上，所以有一份 Gitee 镜像：**https://gitee.com/wutong2005/dsh-vocab-study**
 
-它和 GitHub **逐提交一致**（HEAD sha 相同，41 个提交 + 标签都在）。
-我在两边的克隆里各跑过 8 个套件，都是 0 失败。
+它和 GitHub **逐提交一致**（HEAD sha 相同，全部提交 + 标签都在）。
+我在两边的克隆里各跑过 12 个套件，都是 0 失败。
 
 从 Gitee 装的做法是「先克隆，再装本地目录」（`dsh plugin` 没有 `gitee:` 这种形态）：
 
@@ -378,7 +378,8 @@ core/      纯逻辑。零宿主依赖，可跨环境运行（Node 里直接跑�
   beckon.mjs    「该不该招呼你」的状态机（第一词/好久不见/到期/学词中/交接…）
   session.mjs   一次学习会话：轮次、同轮重训、撤销、拼写测验
   library.mjs   词库：内置种子 / 剪贴板解析 / 降级到内置词表
-  seed-cet4.mjs 四级内置词表（116 词，手写，带例句和搭配）
+  seed-cet4.mjs 四级内置词表的手写部分（116 词，带人工例句/译文/搭配/词根）
+seed-cet4-extra.mjs 四级内置词表的补全部分（4,375 词，来自公开四级词表，见 tools/make-cet4-extra.mjs）
   seed-exams.mjs 六级/考研/雅思/托福/GRE 内置词表（生成的，见下）
   speech.mjs    系统语音朗读（不支持就静默跳过，不影响背词）
   app.mjs       把它们缝起来，对外只暴露一个 createApp(ports)
@@ -465,6 +466,8 @@ python tools/build-plugin.py   # → lib/client.js + lib/index.js（真正装进
 ```powershell
 python tools/build.py && python tools/build-plugin.py
 node test/core.test.mjs
+node test/roots.test.mjs
+node test/weekly-report.test.mjs
 node test/plugin.test.mjs
 node test/demo-boot.test.mjs
 node test/client-activation.test.mjs
@@ -472,11 +475,15 @@ node test/bundle-audit.test.mjs
 node test/mount.test.mjs
 node test/round-control.test.mjs
 node test/multi-conversation.test.mjs
+node test/examples-etym.test.mjs
+node test/collocations.test.mjs
 ```
 
 | 测试 | 覆盖什么 | 当前 |
 |---|---|---|
 | `test/core.test.mjs` | 共享验收用例 20 组 + 种子数据、字段名一致性等体检 + **记忆钩子 12 项** + **新词顺序 13 项** + **收录自动补释义 / 不熟的给提示 / 收服自动归档 / 加量可设（含"不许白屏"的双向登记守卫）** | **106 通过 / 0 失败**（85 汇总 + 21 健全性附加检查） |
+| `test/roots.test.mjs` | 词根词缀数据表自洽 + 查询层 + 两条数据入口（远程词表 / 内置种子）：拆解必须能看出词素、来源必须能看出出处，查不到就是 null，绝不硬编 | **82 通过 / 0 失败** |
+| `test/weekly-report.test.mjs` | 周报：跨周、跨月、跨年、时区、空数据、只有新词没有复习词等边界 | **26 通过 / 0 失败** |
 | `test/plugin.test.mjs` | 假宿主：槽位契约、胶囊顺序、key 一致性、组件可实例化、样式只注入一次、**真的点一次胶囊并断言走到了 `openTabIn`**（见事故四） | **33 通过 / 0 失败** |
 | `test/demo-boot.test.mjs` | 最小 DOM 里真的跑一遍 demo 产物：外壳建起来、四个页签逐个点开、**真的点一次「✨ 让我记住它」并检查输出非空**、**真的拨一次「出场顺序」开关并检查设置变了**、**真的走一遍新功能（收录→补释义→不熟提示→收服归档→改加量）** | **62 通过 / 0 失败** |
 | `test/client-activation.test.mjs` | **真的把 `lib/client.js` 跑起来**：注册 → 物化工厂 → 检查导出 → **调 `apply(ctx)`** → 断言注册了哪些槽位。守的是"插件能不能被宿主激活" | **18 通过 / 0 失败** |
@@ -484,6 +491,9 @@ node test/multi-conversation.test.mjs
 | `test/mount.test.mjs` | **真的把界面画出来并断言节点进了 DOM 树**：从产物里抠出傀儡工厂 → 拿真容器建一遍 → 断言容器里真的有 `.vs-panel` / `.vs-capsule`。守的是"注册成功了但屏幕上是空的"（见事故三）。第 ⑤ 节守**播放键不是死键**（见事故六） | **33 通过 / 0 失败** |
 | `test/round-control.test.mjs` | 「背完一轮之后」的三条出路：今日已背计数、再背一轮、往后加量、安全阀（自动触发 + 用户放行）、跨天重置，**三个只有真点一遍才发现的 bug 的回归锁**，第 ⑧ 节**换词库必须真的把词换掉**（见事故七），第 ⑨ 节**设置要留痕**，第 ⑩ 节**用真实存储件测写入/读取对称**（见事故九 —— 这节的绿必须是真绿，因为前两节用的替身把它屏蔽过），第 ③.5 节**「再来 5 个新词」不许重考刚背过的**（见事故十 —— 断言的是"下一张卡是谁"，不是容器自己的属性） | **107 通过 / 0 失败** |
 | `test/multi-conversation.test.mjs` | **两个对话必须共用同一个内核实例**（见[事故十一](docs/INCIDENTS.md)）。物化真产物 → 拿真注册的胶囊组件 → 用假 React 挂两次（`conv-a` / `conv-b`）→ 断言两次拿到的是**同一个 app**，再从一个对话改设置、验证另一个立刻看到。第 ③ 节只做不会误报的结构断言 | **13 通过 / 0 失败** |
+
+| `test/examples-etym.test.mjs` | 例句（Tatoeba）+ 词源（Wiktionary）：每条英文必须是 3–14 词的完整句子且含目标词、中文必须简体、**译文允许为 null（英文单语）但绝不编造**、台版用词 = 0、词源必须分清「拆解」与「来源」 | **37 通过 / 0 失败** |
+| `test/collocations.test.mjs` | 常见搭配：形态自洽、**精度回归**（上一版 `fish is` / `better consult` 那种垃圾不许回来）、查询层返回副本、两条数据入口都接上、常识搭配命中率 ≥90%、覆盖率闸门（≥15%，实测 34.7%）、名词+介词回归 | **29 通过 / 0 失败** |
 
 > **测试只在仓库里跑，不随 npm 包发布。** 这个决定有原因，不是随手写的：
 > 测试要 `core/` `store/` `ui/` `adapter/` `demo/` 才能跑，而 `demo/` 有 **25.7 MB**；
@@ -494,14 +504,14 @@ node test/multi-conversation.test.mjs
 > 现在 `test/` 不进包，`test/core.test.mjs` 里有一条断言守着这件事（会红那种）。
 > **要跑测试就克隆仓库**，`test/` 和源码都在那里。
 
-**「400 条断言」是怎么数的**（口径写在这里，免得下次自己都对不上）：
-**每个套件打印的汇总数字 + 该套件「健全性附加检查」里 ✓ 的条数**。
+**「591 条断言」是怎么数的**（口径写在这里，免得下次自己都对不上）：
+跑 `node tools/count-assertions.mjs` 现算，**每个套件打印的汇总数字 + 该套件
+「健全性附加检查」里 ✓ 的条数**。
 
 > 为什么不是只数汇总行：`core.test.mjs` 先打印 `85 通过 / 0 失败`，**之后**才跑一段
 > 附加体检，那些 ✓ 不在汇总里。只抓汇总的话，附加检查里加多少条、数字都不动 ——
 > 我吃过这个亏：新加了 8 条断言，总数还是 372，一度以为没生效。
-> 现算的完整明细（`node tools/make-promo.mjs --count` 输出）：
-> `core=106  demo-boot=62  round-control=107  mount=33  plugin=33  bundle-audit=28  client-activation=18  multi-conversation=13`。
+> 现算明细：`core=108  demo-boot=62  round-control=107  mount=33  plugin=33  bundle-audit=28  client-activation=18  multi-conversation=13  roots=90  weekly-report=26  examples-etym=44  collocations=29`。
 
 ### CI
 
@@ -510,7 +520,7 @@ node test/multi-conversation.test.mjs
 
 1. **仓库确实零依赖** —— 出现 `node_modules` 就红（装插件本来也不需要它）；
 2. **提交的产物是最新的** —— 重新构建后 `lib/` 有 diff 就红（靠上面那条确定性构建才成立）；
-3. **八个套件全过** + 命名空间清单守卫；
+3. **十二个套件全过** + 命名空间清单守卫；
 4. **市场收录要的字段没坏** —— `dsh.bundle.patch` 指向的文件真的存在、`dsh.client.platform` 仍是 `web`。
 
 > 第 2 条以前是**做不了**的：构建时间戳用 `datetime.now()`，重新构建必然差一行，
@@ -630,7 +640,7 @@ $env:VS_DUMP=1; node test/demo-boot.test.mjs   # 打印外壳 DOM 树与关键�
 
    | 词库 | 远程词数 | 内置词数 | 状态 |
    |---|---|---|---|
-   | cet4 | 4565 | 116 | ✅ |
+   | cet4 | 4565 | **4491**（116 手写 + 4375 补全） | ✅ |
    | cet6 | 2207 | 5406 | ✅ |
    | kaoyan | 5304 | 4801 | ✅ |
    | ielts | **无远程源** | 5040 | 只有内置 |

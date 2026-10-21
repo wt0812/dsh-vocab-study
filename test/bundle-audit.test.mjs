@@ -41,6 +41,8 @@ const applyBody = bodyOf(t, 'function apply(ctx)').replace(/\/\*[\s\S]*?\*\//g, 
 // 组件的 props 里没有 ctx，所以这里收的是 apply 组装好的能力对象（见「事故四」）。
 const ovBody = bodyOf(t, 'function openVocabTab(abilities, sessionId)').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 const noComment = t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  // 只看代码部分：字符串里的文本会误报（见文件末尾的 maskStrings 说明）
+  const codeOnly = maskStrings(noComment);
 
 console.log('\n=== 1) 注册结构 ===');
 const loads = [...noComment.matchAll(/__ModuleLoader__\.load\(/g)];
@@ -190,12 +192,12 @@ for (const prefix of NS_PREFIXES) {
       String.raw`|\b${prefix}\s*[:=]` +
       String.raw`|\(\s*${prefix}\b`,
     'm',
-  ).test(noComment);
+  ).test(codeOnly);
   if (declared) continue; // 产物里真有这个变量，是合法局部对象
   const re = new RegExp(String.raw`\b${prefix}\.([A-Za-z_$][\w$]*)`, 'g');
-  for (const m of noComment.matchAll(re)) {
+  for (const m of codeOnly.matchAll(re)) {
     const full = `${prefix}.${m[1]}`;
-    if (!dangling.has(full)) dangling.set(full, noComment.slice(0, m.index).split('\n').length);
+    if (!dangling.has(full)) dangling.set(full, codeOnly.slice(0, m.index).split('\n').length);
   }
 }
 ok(
@@ -210,3 +212,38 @@ ok(
 console.log(`\n${bad === 0 ? '✅ 全部通过' : `❌ ${bad} 项未通过`}`);
 process.exit(bad === 0 ? 0 : 1);
 
+// 把字符串/模板串也屏蔽成空格（保留换行，行号不变）。
+// 第 ⑪ 项用的是文本正则，会把**数据里**的文本当成代码：例句数据里有一条
+// `A.I. won't reach singularity.`，检查器看到 `A.I` 就报「悬空命名空间 A.I」。
+// 这是真的误报（构建时也踩过同一个，已在 build-plugin.py 里修）。
+function maskStrings(src) {
+  const out = src.split('');
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      out[i] = ' ';
+      i++;
+      while (i < src.length) {
+        const c = src[i];
+        if (c === '\\') {
+          out[i] = ' ';
+          if (i + 1 < src.length && src[i + 1] !== '\n') out[i + 1] = ' ';
+          i += 2;
+          continue;
+        }
+        if (c === quote) {
+          out[i] = ' ';
+          i++;
+          break;
+        }
+        if (c !== '\n') out[i] = ' ';
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return out.join('');
+}

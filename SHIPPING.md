@@ -182,9 +182,9 @@ if (!(behind && (hasCommits || (specKey === null && npmName !== null)))) {
 
 | 情况 | 弹窗显示 |
 |---|---|
-| 用户装着 0.2.8，快照已到 v0.2.9 | ✅ 「版本说明」+ **完整正文**（这就是要的效果） |
+| 用户装着 0.2.9，快照已到 v0.3.0 | ✅ 「版本说明」+ **完整正文**（这就是要的效果） |
 | 用户装着 0.2.8，快照还是 v0.2.8（**发版当天**） | 「提交记录」圆点列表 —— 上游故意不显示，防重复说明 |
-| 用户已装 0.2.9，快照也是 v0.2.9（已是最新） | 「提交记录」—— 同上，不是 bug |
+| 用户已装 0.3.0，快照也是 v0.3.0（已是最新） | 「提交记录」—— 同上，不是 bug |
 
 还有一个**开发态特例**：`file:` / `link:` 形态的安装（本仓库 `tools/install.py`
 装的就是 junction = `file:`）在 `updateNotesFor()` 开头直接返回 `{ kind: 'none' }`
@@ -199,7 +199,7 @@ if (!(behind && (hasCommits || (specKey === null && npmName !== null)))) {
 ```sh
 node tools/verify-market-notes.mjs                                             # 现状
 node tools/verify-market-notes.mjs --installed 0.2.8                           # 假设用户装着 0.2.8
-node tools/verify-market-notes.mjs --assume-snapshot v0.2.9 --installed 0.2.8  # 预览次日
+node tools/verify-market-notes.mjs --assume-snapshot v0.3.0 --installed 0.2.9  # 预览次日
 ```
 
 同时它会对 `docs/releases/<tag>.md` 做**白名单格式体检**。2026-10-19 就靠它抓到一个真错：

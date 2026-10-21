@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // README 里当前写的体积（改了 README 记得改这里）
-const EXPECTED_BYTES = 4578922;
+const EXPECTED_BYTES = 5666969;
 
 const actual = statSync(join(ROOT, 'lib/client.js')).size;
 console.log(

@@ -12,6 +12,7 @@ import * as M from '../core/memory.mjs';
 import * as Q from '../core/queue.mjs';
 import * as S from '../core/session.mjs';
 import * as L from '../core/library.mjs';
+import { SEED_CET4_RAW } from '../core/seed-cet4.mjs';
 import * as G from '../core/game.mjs';
 import * as MK from '../core/mistake.mjs';
 import * as HK from '../core/hook.mjs';
@@ -261,8 +262,19 @@ if (fail === 0) {
   const seed = L.seedFor('cet4');
   extras.push(['种子词库无重复 id', new Set(seed.map((w) => w.id)).size === seed.length]);
   extras.push(['种子词库无重复拼写', new Set(seed.map((w) => w.word)).size === seed.length]);
-  extras.push(['每个词都有例句', seed.every((w) => !!w.example)]);
-  extras.push(['每个词都有词性', seed.every((w) => !!w.pos)]);
+  // 四级词表 = 手写 116 词 + 考纲补全 4,375 词。手写那批满编（例句/词性/译文都人工过），
+  // 补全那批的例句来自语料，必然有一部分词在语料里查不到 —— 不能拿"全都有"当闸门，
+  // 那样只会逼着往数据里硬编。分开断言，各自给合理阈值。
+  const HAND4 = new Set(SEED_CET4_RAW.map((w) => String(w.word).toLowerCase()));
+  const handSeed = seed.filter((w) => HAND4.has(String(w.word).toLowerCase()));
+  const extraSeed = seed.filter((w) => !HAND4.has(String(w.word).toLowerCase()));
+  extras.push([`手写四级词都有例句（${handSeed.length} 词）`, handSeed.every((w) => !!w.example)]);
+  extras.push([`手写四级词都有词性（${handSeed.length} 词）`, handSeed.every((w) => !!w.pos)]);
+  extras.push([
+    `补全四级词有例句的比例 ≥ 85%（${extraSeed.filter((w) => w.example).length}/${extraSeed.length}）`,
+    extraSeed.filter((w) => w.example).length / extraSeed.length >= 0.85,
+  ]);
+  extras.push(['每个词都有词性（含补全词）', seed.every((w) => !!w.pos)]);
   extras.push([
     'DAY_MS 只有一处声明（曾被重复声明炸过整包）',
     typeof M.DAY_MS === 'number' && M.DAY_MS === 86400000,

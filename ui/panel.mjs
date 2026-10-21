@@ -663,7 +663,9 @@ export function createPanel(app, ctx = {}) {
     if (w.word) {
       const fam = app.familyFor ? app.familyFor(w.word, 5) : [];
       if (fam.length) {
-        const shared = fam[0].root || '';
+        // 第一来源（词根家族）带 root；只有第二来源（词形派生）时说明一下来由，
+        // 否则标题只剩个「同族词 (3)」，用户不知道凭什么叫一家。
+        const shared = fam[0].root || (fam[0].kind === 'derivation' ? '词形派生' : '');
         folds.push(
           el('details', { class: 'vs-fold' }, [
             el('summary', { text: shared ? `同族词 · ${shared}` : `同族词 (${fam.length})` }),
@@ -692,28 +694,15 @@ export function createPanel(app, ctx = {}) {
         w.example
           ? el('div', { class: 'vs-ex' }, [
               el('div', { class: 'en', text: w.example }),
+              // 只有英文单语例句时**不显示**译文行 —— 语料里没配对，
+              // 编一句中文就是假数据（§9 铁律）。
               w.exampleZh ? el('div', { class: 'zh', text: w.exampleZh }) : null,
             ])
-          : el('div', { class: 'vs-gray' }, [
-              document.createTextNode('暂无例句 · 可 '),
-              el(
-                'button',
-                {
-                  onclick: () => {
-                    const out = stage.querySelector('#vs-ai-out');
-                    out.dataset.state = 'loading';
-                    out.hidden = false;
-                    setText(out, '✨ 正在编…');
-                    setTimeout(() => {
-                      // AI 挂了不阻塞：显示一句能重试的话（§9.1）
-                      setText(out, '✨ 暂时没编出来 · 重试');
-                      out.dataset.state = 'failed';
-                    }, 900);
-                  },
-                },
-                '✨ 生成',
-              ),
-            ]),
+          : el('div', { class: 'vs-gray', text: '暂无例句' }),
+        // 三项全空时直说，别让用户以为还有东西没展开（§9：没有就说没有）。
+        !w.example && !rootLineText && !(etym && etym.text) && !(w.collocations?.length)
+          ? el('div', { class: 'vs-gray', text: '这个词暂无例句、词根和词源' })
+          : null,
         folds.length ? el('div', { class: 'vs-folds' }, folds) : null,
         el('div', { class: 'vs-ai' }, [
           el(
