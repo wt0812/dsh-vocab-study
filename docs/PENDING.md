@@ -5,6 +5,31 @@
 
 ---
 
+## 0. ✅ npm 0.3.1 已发布（2026-10-23 完成）
+
+**2026-10-23 全平台发完并复核：GitHub（Release 标 Latest）+ Gitee（发行版）
++ npm（latest=0.3.1）+ 国内镜像 + 市场更新公告链路全部到位。0.3.1 这条线收工。**
+
+| 步骤 | 状态与证据 |
+|---|---|
+| 版本号 0.3.1（`package.json` / `README` / `CHANGELOG` / `docs/releases/v0.3.1.md`） | ✅ |
+| `build.py` + `build-plugin.py` 重建（`lib/client.js` 5,674,364 B ≈ 5.41 MB） | ✅ |
+| 13 个测试套件全绿 | ✅ |
+| 提交 `26b4e24` + `27834b2`，GitHub / Gitee 都推了 | ✅ |
+| tag `v0.3.1`（两边都推了） | ✅ |
+| GitHub Release `v0.3.1`，**已标 Latest** | ✅ |
+| Gitee 发行版（API，`tools/make-gitee-release.py`） | ✅ 2026-10-23（id 1232025，正文同一份） |
+| `npm publish` 到 0.3.1 | ✅ 2026-10-23（`latest=0.3.1`，101 文件 / 7.4 MB 解包） |
+| 发布包核对：拉回 tarball 比对 `lib/client.js` SHA-256 | ✅ 逐字节一致 |
+| 市场快照核对 + 正文白名单体检 | ✅ `tools/verify-market-notes.mjs`；快照仍是 10-22 的 v0.3.0，属每日快照正常延迟 |
+
+**发完之后只剩等外部，别重复动作**：
+1. 市场快照**每日**重生成，现在 `updates.json` 我们这条是 `v0.3.0`。复检用
+   `node tools/verify-market-notes.mjs --installed 0.3.0`（**别加 `--offline`**）。
+2. npmmirror 同步无 API 可推，已自动跟上 `latest=0.3.1`。
+
+---
+
 ## 0.1 ✅ 0.3.0 已发布（2026-10-21，全平台）
 
 **2026-10-21 全平台发完并复核：GitHub（Release 标 Latest）+ Gitee（发行版）
