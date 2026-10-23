@@ -1,4 +1,4 @@
-"""在 Gitee 上建 v0.3.1 发行版（Release），正文与 GitHub 同一份。
+"""在 Gitee 上建 v0.3.2 发行版（Release），正文与 GitHub 同一份。
 
 凭据来源：git 的 credential.helper=manager（Windows 凭据管理器）里已保存的
 Gitee HTTPS 凭据 —— 用 `git credential fill` 取出来直接用，**不打印、不落盘**。
@@ -17,9 +17,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 OWNER = "wutong2005"
 REPO = "dsh-vocab-study"
-TAG = "v0.3.1"
-TITLE = "v0.3.1 · 眼熟小组件 + CI 自检修复"
-BODY_FILE = "docs/releases/v0.3.1.md"
+TAG = "v0.3.2"
+TITLE = "v0.3.2 · 修复换词库后设置页状态行重叠"
+BODY_FILE = "docs/releases/v0.3.2.md"
 API = f"https://gitee.com/api/v5/repos/{OWNER}/{REPO}"
 
 
