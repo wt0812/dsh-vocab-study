@@ -1,4 +1,4 @@
-"""在 Gitee 上建 v0.3.0 发行版（Release），正文与 GitHub 同一份。
+"""在 Gitee 上建 v0.3.1 发行版（Release），正文与 GitHub 同一份。
 
 凭据来源：git 的 credential.helper=manager（Windows 凭据管理器）里已保存的
 Gitee HTTPS 凭据 —— 用 `git credential fill` 取出来直接用，**不打印、不落盘**。
@@ -12,11 +12,14 @@ import sys
 import urllib.parse
 import urllib.request
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 OWNER = "wutong2005"
 REPO = "dsh-vocab-study"
-TAG = "v0.3.0"
-TITLE = "v0.3.0 · 卡片背面终于有话可说：例句 94.5%、常见搭配 34.7%、同族词 43.3%"
-BODY_FILE = "docs/releases/v0.3.0.md"
+TAG = "v0.3.1"
+TITLE = "v0.3.1 · 眼熟小组件 + CI 自检修复"
+BODY_FILE = "docs/releases/v0.3.1.md"
 API = f"https://gitee.com/api/v5/repos/{OWNER}/{REPO}"
 
 
