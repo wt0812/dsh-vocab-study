@@ -780,3 +780,46 @@
 .vs.vs-tiny .vs-word { font-size: 20px; }
 .vs.vs-tiny .vs-meaning { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vs.vs-tiny .vs-body { padding: 6px 8px 2px; }
+
+/* ═══════════ 眼熟小组件 ═══════════ */
+.vs-eye-candy {
+  position: relative;
+  margin: 14px auto;
+  padding: 12px 14px;
+  border-radius: var(--vs-radius);
+  background: var(--vs-paper-2);
+  border-left: 3px solid var(--vs-jade);
+  max-width: 280px;
+}
+.vs-eye-candy-compact {
+  margin: 0;
+  padding: 8px 10px;
+  border-left-width: 2px;
+}
+.vs-eye-label {
+  font-size: 10.5px;
+  color: var(--vs-ink-faint);
+  margin-bottom: 5px;
+}
+.vs-eye-close {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vs-ink-faint);
+  font-size: 16px;
+  cursor: pointer;
+}
+.vs-eye-close:hover { color: var(--vs-ink); background: var(--vs-chip); }
+.vs-eye-word { font-size: 17px; font-weight: 700; color: var(--vs-ink); }
+.vs-eye-phonetic { font-size: 12px; color: var(--vs-ink-soft); }
+.vs-eye-meaning { font-size: 13px; color: var(--vs-ink-soft); margin-top: 3px; line-height: 1.4; }
+.vs-eye-candy-compact .vs-eye-word { font-size: 14px; display: inline; margin-right: 6px; }
+.vs-eye-candy-compact .vs-eye-phonetic { display: inline; }
+.vs-eye-candy-compact .vs-eye-meaning { font-size: 11.5px; margin-top: 4px; }

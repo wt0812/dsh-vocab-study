@@ -1,6 +1,6 @@
 {
   "name": "dsh-vocab-study",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "今日词汇 (Vocabulary Study) —— DSH 的背单词面板：一个胶囊 + 一个标签页，按记忆半衰期排期，离线可用，不催不指责。",
   "repository": {
     "type": "git",
@@ -46,7 +46,7 @@
     "build": "python tools/build.py && python tools/build-plugin.py",
     "screenshots": "node tools/make-screenshots.mjs",
     "promo": "node tools/make-promo.mjs",
-    "test": "node test/core.test.mjs && node test/roots.test.mjs && node test/weekly-report.test.mjs && node test/plugin.test.mjs && node test/demo-boot.test.mjs && node test/client-activation.test.mjs && node test/bundle-audit.test.mjs && node test/mount.test.mjs && node test/round-control.test.mjs && node test/multi-conversation.test.mjs && node test/examples-etym.test.mjs && node test/collocations.test.mjs"
+    "test": "node test/core.test.mjs && node test/roots.test.mjs && node test/weekly-report.test.mjs && node test/plugin.test.mjs && node test/demo-boot.test.mjs && node test/client-activation.test.mjs && node test/bundle-audit.test.mjs && node test/mount.test.mjs && node test/round-control.test.mjs && node test/multi-conversation.test.mjs && node test/examples-etym.test.mjs && node test/collocations.test.mjs && node test/eye-candy.test.mjs"
   },
   "keywords": [
     "deepseek",

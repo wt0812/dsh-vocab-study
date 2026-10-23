@@ -11,6 +11,7 @@
 
 import { el, mount, clear, setText, focusSelf, prefersReducedMotion } from './dom.mjs';
 import { renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap, collectionLabel } from './pages.mjs';
+import { createEyeCandy } from './eye-candy.mjs';
 
 const TABS = [
   ['today', '今日'],
@@ -36,6 +37,7 @@ export function createPanel(app, ctx = {}) {
   let undoCardKey = null;
   let undoUntil = 0;
   let disposed = false;
+  let eyeCandyTimer = null;
 
   // ── 行为 ────────────────────────────────────────────────
 
@@ -222,6 +224,16 @@ export function createPanel(app, ctx = {}) {
 
   // ── 今日页 ──────────────────────────────────────────────
 
+  function attachEyeCandy(st) {
+    if (eyeCandyTimer) {
+      clearInterval(eyeCandyTimer);
+      eyeCandyTimer = null;
+    }
+    const w = createEyeCandy(app, st);
+    if (w) eyeCandyTimer = w.__eyeCandyTimer;
+    return w;
+  }
+
   function renderToday(host, st) {
     const card = st.card;
     if (!card) {
@@ -276,6 +288,8 @@ export function createPanel(app, ctx = {}) {
             : null,
           el('div', { style: { textAlign: 'center' } },
             el('button', { class: 'vs-btn muted', onclick: () => setTab('settings') }, '换词库')),
+          // 眼熟小组件：放在按钮区和数据带之间，用户一完成就能看到今天背过的词。
+          attachEyeCandy(st),
           // 数据带也要在走完一轮时留着：用户此刻最想确认的就是"我今天背了多少"，
           // 把数字在他达成的那一刻收走是最不该的。
           el('div', { class: 'vs-deck vs-deck-done' }, deckContent(st)),
@@ -858,6 +872,10 @@ export function createPanel(app, ctx = {}) {
     root,
     destroy() {
       disposed = true;
+      if (eyeCandyTimer) {
+        clearInterval(eyeCandyTimer);
+        eyeCandyTimer = null;
+      }
     },
     render,
     focus: () => focusSelf(root),

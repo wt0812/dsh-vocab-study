@@ -460,6 +460,58 @@ function VocabMenuItem(props) {
 }
 
 /**
+ * 左侧边栏底部的「眼熟小组件」。
+ *
+ * 注意：这里**只处理左侧边栏版本**。插件面板中间的版本由 ui/panel.mjs
+ * 里的 createPanel 直接渲染，避免把 React 依赖卷进面板那套纯 DOM 逻辑。
+ */
+function EyeCandySeat() {
+  const core = useCore();
+  const [tick, setTick] = React.useState(0);
+  const [index, setIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!core) return;
+    const unsub = core.app.subscribe(() => setTick((t) => t + 1));
+    return unsub;
+  }, [core]);
+
+  const words = React.useMemo(() => {
+    if (!core) return [];
+    return core.app.todayStudiedWords?.() || [];
+  }, [core, tick]);
+
+  const cfg = React.useMemo(() => core?.app.state.settings?.eyeCandy, [core, tick]);
+
+  React.useEffect(() => {
+    if (!words.length) return;
+    setIndex(Math.floor(Math.random() * words.length));
+  }, [words.length]);
+
+  React.useEffect(() => {
+    if (!words.length) return;
+    const id = setInterval(() => setIndex((i) => (i + 1) % words.length), 8000);
+    return () => clearInterval(id);
+  }, [words.length]);
+
+  if (!core) return null;
+  if (!cfg?.showInSidebar) return null;
+  if (!words.length) return null;
+
+  const w = words[index % words.length];
+  return React.createElement(
+    'div',
+    { className: 'vs-eye-candy vs-eye-candy-compact' },
+    [
+      React.createElement('div', { key: 'l', className: 'vs-eye-label' }, '今天背过的词'),
+      React.createElement('div', { key: 'w', className: 'vs-eye-word' }, w.word || ''),
+      React.createElement('div', { key: 'p', className: 'vs-eye-phonetic' }, w.ipa || ''),
+      React.createElement('div', { key: 'm', className: 'vs-eye-meaning' }, w.meaning || ''),
+    ],
+  );
+}
+
+/**
  * 插件安装。
  *
  * `inject` 里声明的服务由框架在 apply 之前解析好；少了哪个，
@@ -585,6 +637,19 @@ export function apply(ctx) {
           label: '今日背单词',
         },
         VocabMenuItem,
+      ),
+    );
+
+    // 眼熟小组件：默认关闭，用户可在设置里开到左侧边栏底部
+    scope.slots.inject('sidebar.footer.action', () =>
+      scope.slots.register(
+        {
+          name: 'sidebar.footer.action',
+          id: 'vocab-study-eye-candy',
+          order: 10,
+          label: '今日眼熟',
+        },
+        EyeCandySeat,
       ),
     );
   });

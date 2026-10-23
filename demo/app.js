@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-21T05:25:39Z
+ * 构建时间：2026-10-23T02:56:20Z
  */
 'use strict';
 
@@ -82707,6 +82707,9 @@ function createApp(ports = {}) {
       // 只有用户本人按了「我还是想继续」才变 true，代码不会替他打开。
       allowMoreNew: s.allowMoreNew === true,
       prompts: s.prompts || defaultPrompts(),
+      eyeCandy: {
+        showInSidebar: s.eyeCandy?.showInSidebar === true,
+      },
       schemaVersion: 1,
     };
   }
@@ -82983,6 +82986,25 @@ function createApp(ports = {}) {
       newWrongRate: newRecs.length ? wrong / newRecs.length : 0,
     };
   }
+  /**
+   * 今天已经背过（答过题）的**不同词**列表。
+   *
+   * 给眼熟小组件用：只轮播今天真正碰过的词，避免把没背的生词提前塞给用户。
+   */
+  function todayStudiedWords() {
+    const seen = new Set();
+    const list = [];
+    for (const r of state.records) {
+      if (r.dayKey !== state.dayKey) continue;
+      if (seen.has(r.wordId)) continue;
+      const w = state.words.find((x) => x.id === r.wordId);
+      if (!w) continue;
+      seen.add(r.wordId);
+      list.push(w);
+    }
+    return list;
+  }
+
   function gapDays() {
     if (!state.streak.lastDay) return 0;
     return Math.max(0, Q.daysBetweenKeys(state.streak.lastDay, Q.dayKey(now())) - 1);
@@ -83744,6 +83766,7 @@ function createApp(ports = {}) {
     acceptProposal,
     dismissProposal,
     beckon,
+    todayStudiedWords,
     hookFor,
     hookPeek,
     /**
@@ -84687,6 +84710,20 @@ function renderSettings(root, st, app) {
     collectionStatusLine(st.lastLibraryChange),
     el('div', { class: 'vs-sub', text: st.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
 
+    el('div', { class: 'vs-h2', text: '眼熟小组件' }),
+    el('div', { class: 'vs-field' }, [
+      el('label', { for: 'vs-eye-candy-sidebar' }, [
+        '在左侧边显示',
+        el('span', { class: 'note', text: '面板中间会始终显示；这里只控制左侧边' }),
+      ]),
+      el('input', {
+        id: 'vs-eye-candy-sidebar',
+        type: 'checkbox',
+        checked: s.eyeCandy?.showInSidebar ? true : null,
+        onchange: (ev) => app.updateSettings({ eyeCandy: { ...s.eyeCandy, showInSidebar: !!ev.target.checked } }),
+      }),
+    ]),
+
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
     el('div', { class: 'vs-field' }, [
       el('label', {}, ['模式', el('span', { class: 'note', text: '每词一生只生成一次，结果写回本地永久复用' })]),
@@ -84913,6 +84950,70 @@ function renderWeeklyReport(root, report) {
 return { injectCore, renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap, collectionLabel };
 })();
 
+// ═══════════ ui/eye-candy.mjs → UI_EYE_CANDY ═══════════
+VOCAB_CORE.UI_EYE_CANDY = (() => {
+const el = VOCAB_CORE.UI_DOM.el;
+const mount = VOCAB_CORE.UI_DOM.mount;
+// vocab-study / ui / eye-candy.mjs
+// 「眼熟小组件」面板版：背完一轮后，在按钮区与数据带之间轮播今天已背过的词。
+//
+// 设计约束：
+//   · 不交互、不计分、不影响学习记录；
+//   · 面板版总是显示（有今天背过的词时），不需要设置项开关；
+//   · 左侧边栏版由 adapter/dsh/client.js 里的 React 组件单独渲染，开关在设置页。
+const EYE_CANDY_INTERVAL = 8000;
+
+/**
+ * 创建一个面板用眼熟小组件 DOM 节点。
+ *
+ * @param {object} app   core app 实例（需有 todayStudiedWords）
+ * @param {object} st    当前快照
+ * @returns {HTMLElement|null} 返回挂载后带 __eyeCandyTimer 的节点；无词时返回 null
+ */
+function createEyeCandy(app, st) {
+  const words = app.todayStudiedWords?.() || [];
+  if (!words.length) return null;
+
+  const root = el('div', { class: 'vs-eye-candy' });
+  let index = Math.floor(Math.random() * words.length);
+
+  const label = el('div', { class: 'vs-eye-label', text: '今天背过的词' });
+  const closeBtn = el('button', {
+    class: 'vs-eye-close',
+    title: '隐藏',
+    text: '×',
+    onclick: () => {
+      root.style.display = 'none';
+    },
+  });
+  const wordEl = el('div', { class: 'vs-eye-word' });
+  const phoneticEl = el('div', { class: 'vs-eye-phonetic' });
+  const meaningEl = el('div', { class: 'vs-eye-meaning' });
+
+  function show(i) {
+    const w = words[i % words.length];
+    wordEl.textContent = w.word || '';
+    phoneticEl.textContent = w.ipa || '';
+    meaningEl.textContent = w.meaning || '';
+  }
+
+  mount(root, label, closeBtn, wordEl, phoneticEl, meaningEl);
+  show(index);
+
+  const timer = setInterval(() => {
+    index = (index + 1) % words.length;
+    show(index);
+  }, EYE_CANDY_INTERVAL);
+
+  // 让外部在重绘或卸载时能清掉定时器，避免泄漏
+  root.__eyeCandyTimer = timer;
+
+  return root;
+}
+
+return { createEyeCandy, EYE_CANDY_INTERVAL };
+})();
+
 // ═══════════ ui/panel.mjs → UI_PANEL ═══════════
 VOCAB_CORE.UI_PANEL = (() => {
 const el = VOCAB_CORE.UI_DOM.el;
@@ -84927,6 +85028,7 @@ const renderSettings = VOCAB_CORE.UI_PAGES.renderSettings;
 const renderWeeklyReport = VOCAB_CORE.UI_PAGES.renderWeeklyReport;
 const heatmap = VOCAB_CORE.UI_PAGES.heatmap;
 const collectionLabel = VOCAB_CORE.UI_PAGES.collectionLabel;
+const createEyeCandy = VOCAB_CORE.UI_EYE_CANDY.createEyeCandy;
 // vocab-study / ui / panel.mjs
 // 学习面板：今日 / 进度 / 生词本 / 设置。
 //
@@ -84937,6 +85039,7 @@ const collectionLabel = VOCAB_CORE.UI_PAGES.collectionLabel;
 //
 // 反例（规格原文）：用户对着输入框打字时敲下 1，后台卡片被标成「忘了」
 // 并写入 DP 模型 —— 静默污染学习记录。
+
 
 
 const TABS = [
@@ -84962,6 +85065,7 @@ function createPanel(app, ctx = {}) {
   let undoCardKey = null;
   let undoUntil = 0;
   let disposed = false;
+  let eyeCandyTimer = null;
 
   // ── 行为 ────────────────────────────────────────────────
 
@@ -85148,6 +85252,16 @@ function createPanel(app, ctx = {}) {
 
   // ── 今日页 ──────────────────────────────────────────────
 
+  function attachEyeCandy(st) {
+    if (eyeCandyTimer) {
+      clearInterval(eyeCandyTimer);
+      eyeCandyTimer = null;
+    }
+    const w = createEyeCandy(app, st);
+    if (w) eyeCandyTimer = w.__eyeCandyTimer;
+    return w;
+  }
+
   function renderToday(host, st) {
     const card = st.card;
     if (!card) {
@@ -85202,6 +85316,8 @@ function createPanel(app, ctx = {}) {
             : null,
           el('div', { style: { textAlign: 'center' } },
             el('button', { class: 'vs-btn muted', onclick: () => setTab('settings') }, '换词库')),
+          // 眼熟小组件：放在按钮区和数据带之间，用户一完成就能看到今天背过的词。
+          attachEyeCandy(st),
           // 数据带也要在走完一轮时留着：用户此刻最想确认的就是"我今天背了多少"，
           // 把数字在他达成的那一刻收走是最不该的。
           el('div', { class: 'vs-deck vs-deck-done' }, deckContent(st)),
@@ -85784,6 +85900,10 @@ function createPanel(app, ctx = {}) {
     root,
     destroy() {
       disposed = true;
+      if (eyeCandyTimer) {
+        clearInterval(eyeCandyTimer);
+        eyeCandyTimer = null;
+      }
     },
     render,
     focus: () => focusSelf(root),

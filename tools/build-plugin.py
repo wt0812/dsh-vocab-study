@@ -140,7 +140,7 @@ CORE_ORDER = [
     "core/app.mjs",
 ]
 STORE_ORDER = ["store/client-store.mjs"]
-UI_ORDER = ["ui/dom.mjs", "ui/styles.css", "ui/pages.mjs", "ui/panel.mjs", "ui/capsule.mjs"]
+UI_ORDER = ["ui/dom.mjs", "ui/styles.css", "ui/eye-candy.mjs", "ui/pages.mjs", "ui/panel.mjs", "ui/capsule.mjs"]
 # core-ref 必须排在「登记命名空间」那一步之前，否则会撞上 TDZ：
 # 它的 `let CORE = {...}` 还没执行，setCore() 就去写 CORE 了。
 CORE_REF = "ui/core-ref.mjs"

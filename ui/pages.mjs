@@ -392,6 +392,20 @@ export function renderSettings(root, st, app) {
     collectionStatusLine(st.lastLibraryChange),
     el('div', { class: 'vs-sub', text: st.librarySource === 'seed' ? '现在用的是内置词表（离线）' : '词表已缓存到本地，之后永久离线可用' }),
 
+    el('div', { class: 'vs-h2', text: '眼熟小组件' }),
+    el('div', { class: 'vs-field' }, [
+      el('label', { for: 'vs-eye-candy-sidebar' }, [
+        '在左侧边显示',
+        el('span', { class: 'note', text: '面板中间会始终显示；这里只控制左侧边' }),
+      ]),
+      el('input', {
+        id: 'vs-eye-candy-sidebar',
+        type: 'checkbox',
+        checked: s.eyeCandy?.showInSidebar ? true : null,
+        onchange: (ev) => app.updateSettings({ eyeCandy: { ...s.eyeCandy, showInSidebar: !!ev.target.checked } }),
+      }),
+    ]),
+
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
     el('div', { class: 'vs-field' }, [
       el('label', {}, ['模式', el('span', { class: 'note', text: '每词一生只生成一次，结果写回本地永久复用' })]),

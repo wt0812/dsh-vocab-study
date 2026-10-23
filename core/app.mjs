@@ -346,6 +346,9 @@ export function createApp(ports = {}) {
       // 只有用户本人按了「我还是想继续」才变 true，代码不会替他打开。
       allowMoreNew: s.allowMoreNew === true,
       prompts: s.prompts || defaultPrompts(),
+      eyeCandy: {
+        showInSidebar: s.eyeCandy?.showInSidebar === true,
+      },
       schemaVersion: 1,
     };
   }
@@ -622,6 +625,25 @@ export function createApp(ports = {}) {
       newWrongRate: newRecs.length ? wrong / newRecs.length : 0,
     };
   }
+  /**
+   * 今天已经背过（答过题）的**不同词**列表。
+   *
+   * 给眼熟小组件用：只轮播今天真正碰过的词，避免把没背的生词提前塞给用户。
+   */
+  function todayStudiedWords() {
+    const seen = new Set();
+    const list = [];
+    for (const r of state.records) {
+      if (r.dayKey !== state.dayKey) continue;
+      if (seen.has(r.wordId)) continue;
+      const w = state.words.find((x) => x.id === r.wordId);
+      if (!w) continue;
+      seen.add(r.wordId);
+      list.push(w);
+    }
+    return list;
+  }
+
   function gapDays() {
     if (!state.streak.lastDay) return 0;
     return Math.max(0, Q.daysBetweenKeys(state.streak.lastDay, Q.dayKey(now())) - 1);
@@ -1383,6 +1405,7 @@ export function createApp(ports = {}) {
     acceptProposal,
     dismissProposal,
     beckon,
+    todayStudiedWords,
     hookFor,
     hookPeek,
     /**
