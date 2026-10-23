@@ -35,7 +35,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 项 | 说明 |
 |---|---|
-| 版本 | `0.3.1`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
+| 版本 | `0.3.2`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
 | 成熟度 | 功能可用、**在真界面里逐条点过**；13 套件 / 约 600 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
 | 体积 | `lib/client.js` 5,674,364 B ≈ **5.41 MB**（内含六本词库共 **34,216** 词，见[为什么这么大](#构建)） |

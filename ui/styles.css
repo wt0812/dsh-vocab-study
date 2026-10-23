@@ -691,10 +691,12 @@
 .vs-h2:first-child { margin-top: 2px; }
 .vs-big { font-size: 30px; font-weight: 600; font-family: var(--vs-mono); letter-spacing: -.02em; }
 .vs-big small { font-size: 12px; font-family: var(--vs-serif); color: var(--vs-ink-soft); font-weight: 400; margin-left: 5px; }
-.vs-sub { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 2px; }
+.vs-sub { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 8px; flex-shrink: 0; }
 /* 换词库的结果行。三种状态必须**看得出区别** —— 用户报的就是
-   「显示更换成功但主页没反应」，所以"成了/没成/为什么没成"不能长得一样。 */
-.vs-collection-status { font-size: 11.5px; line-height: 1.55; margin-top: 6px; min-height: 0; }
+   「显示更换成功但主页没反应」，所以"成了/没成/为什么没成"不能长得一样。
+   注意：.vs-body 是 flex column，这里作为 flex item 必须能保住自己的高度，
+   否则文字会溢出并盖到下一行（见 0.3.2 修复的换库状态行重叠 bug）。 */
+.vs-collection-status { font-size: 11.5px; line-height: 1.55; margin-top: 6px; min-height: auto; flex-shrink: 0; }
 .vs-collection-status:empty { display: none; }
 .vs-collection-status[data-kind="ok"] { color: var(--vs-jade); }
 .vs-collection-status[data-kind="error"] { color: var(--vs-coral-text); }

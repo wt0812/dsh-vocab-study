@@ -5,6 +5,16 @@
 
 ---
 
+## [0.3.2] — 2026-10-23
+
+### 修复
+
+- **换词库后设置页状态行文字重叠。** 根因是 `.vs-collection-status` 作为 `.vs-body`（flex column）的 flex item 时设置了 `min-height: 0`，
+  面板高度紧张时该行会被压到 0，文字溢出并盖到下面的「眼熟小组件」等行。修法：把 `min-height: 0` 改回 `auto`，
+  并给 `.vs-collection-status` 和 `.vs-sub` 都加上 `flex-shrink: 0`，让状态行保住自己的高度。
+
+---
+
 ## [0.3.1] — 2026-10-23
 
 ### 新增
