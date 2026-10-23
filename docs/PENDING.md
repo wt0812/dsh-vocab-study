@@ -13,14 +13,14 @@
 | 步骤 | 状态与证据 |
 |---|---|
 | 版本号 0.3.2（`package.json` / `README` / `CHANGELOG` / `docs/releases/v0.3.2.md`） | ✅ |
-| `build.py` + `build-plugin.py` 重建（`lib/client.js` 5,674,? B ≈ 5.41 MB） | ✅ |
+| `build.py` + `build-plugin.py` 重建（`lib/client.js` 5,674,591 B ≈ 5.41 MB） | ✅ |
 | 13 个测试套件全绿 | ✅ |
-| 提交并推送到 GitHub / Gitee | ✅ |
+| 提交 `c7840f5` + `33125ed`，GitHub / Gitee 都推了 | ✅ |
 | tag `v0.3.2`（两边都推了） | ✅ |
 | GitHub Release `v0.3.2`，**已标 Latest** | ✅ |
-| Gitee 发行版（API，`tools/make-gitee-release.py`） | ✅ |
-| `npm publish` 到 0.3.2 | ✅ |
-| 发布包核对：拉回 tarball 比对 `lib/client.js` SHA-256 | ✅ 逐字节一致 |
+| Gitee 发行版（API，`tools/make-gitee-release.py`） | ✅ 2026-10-23（id 1232097，正文同一份） |
+| `npm publish` 到 0.3.2 | ✅ 2026-10-23（`latest=0.3.2`，102 文件 / 7.4 MB 解包，shasum `4eb3d3049834355b5bca65f665a9ac9414bdfaf9`） |
+| 发布包核对：拉回 tarball 比对 `lib/client.js` SHA-256 | ✅ 逐字节一致（`81be9a812791affc2a8d2e019e7cb7324db69c0ca21fa90ceb67af5ea3c56ae1`） |
 | 市场快照核对 + 正文白名单体检 | ✅ |
 
 **发完之后只剩等外部，别重复动作**：
