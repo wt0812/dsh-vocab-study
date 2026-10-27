@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-23T02:56:20Z
+ * 构建时间：2026-10-27T09:03:40Z
  */
 'use strict';
 
@@ -84371,13 +84371,16 @@ function curveSvg(curve) {
   const path = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.day).toFixed(1)},${y(p.recall).toFixed(1)}`).join(' ');
   const last = curve.scheduled[curve.scheduled.length - 1];
   const lastP = curve.passive[curve.passive.length - 1];
+  // 尺寸和 fill 同样写成属性兜底：样式没上时，path 默认是黑色填充、svg 默认撑满
+  // 父容器（高度退化成 150px 宽高比），会变成一整块黑。属性比 CSS 弱，样式正常时
+  // 仍由 CSS 决定，所以留着不影响观感。
   const svg = `
-<svg class="vs-curve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+<svg class="vs-curve" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" aria-hidden="true">
   <line class="axis" x1="0" y1="${y(0.5)}" x2="${W}" y2="${y(0.5)}"/>
   <line class="axis" x1="0" y1="${y(1)}" x2="${W}" y2="${y(1)}"/>
   <line class="axis" x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"/>
-  <path class="passive" d="${path(curve.passive)}"/>
-  <path class="sched" d="${path(curve.scheduled)}"/>
+  <path class="passive" fill="none" d="${path(curve.passive)}"/>
+  <path class="sched" fill="none" d="${path(curve.scheduled)}"/>
 </svg>`;
   return {
     svg,
@@ -85165,6 +85168,12 @@ function createPanel(app, ctx = {}) {
 
   function render() {
     if (disposed) return;
+    // 样式兜底（2026-10-27，真机上"面板突然变成一个巨大黑圆"就是这条引起的）：
+    // <style data-vocab-study> 只在 apply 时注入一次，之后没人再看它。
+    // 宿主热重载、页签搬移、或本就挂在 ShadowRoot 里时，这份样式可能压根不在当前
+    // 那棵树上 —— 一旦丢了，SVG 退回"无尺寸 + 默认黑色填充"，就成了盖满面板的黑圆。
+    // 所以每次渲染顺手确认一次（命中已存在就只做一次 querySelector，没有额外开销）。
+    if (typeof injectVocabStudyCss === 'function') injectVocabStudyCss(undefined, root);
     const st = app.state;
     root.className = `vs vs-panel ${isDocked() ? 'docked' : 'floating'}`;
     root.dataset.theme = ctx.theme || 'dark';
@@ -85417,10 +85426,14 @@ function createPanel(app, ctx = {}) {
     const R = 20;
     const C = 2 * Math.PI * R;
     const off = C * (1 - Math.max(0, Math.min(1, pct)));
+    // 宽高和 fill 都写成**属性**而不是只靠 CSS：
+    // SVG 没有 width/height 就会撑满父容器，circle 没有 fill="none" 就是默认黑填充 ——
+    // 两个一起缺（样式没上时）就得到一个盖住整个面板的黑色实心圆。
+    // 属性比 CSS 弱，样式正常时仍由 CSS 决定颜色和 68px/54px 的尺寸，所以留着无害。
     return (
-      `<svg class="vs-ring" viewBox="0 0 48 48" aria-hidden="true">` +
-      `<circle class="track" cx="24" cy="24" r="${R}"/>` +
-      `<circle class="arc" cx="24" cy="24" r="${R}" ` +
+      `<svg class="vs-ring" viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">` +
+      `<circle class="track" cx="24" cy="24" r="${R}" fill="none"/>` +
+      `<circle class="arc" cx="24" cy="24" r="${R}" fill="none" ` +
       `stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>` +
       `<text class="pct" x="24" y="24">${label}</text>` +
       `</svg>`

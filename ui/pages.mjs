@@ -49,13 +49,16 @@ function curveSvg(curve) {
   const path = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.day).toFixed(1)},${y(p.recall).toFixed(1)}`).join(' ');
   const last = curve.scheduled[curve.scheduled.length - 1];
   const lastP = curve.passive[curve.passive.length - 1];
+  // 尺寸和 fill 同样写成属性兜底：样式没上时，path 默认是黑色填充、svg 默认撑满
+  // 父容器（高度退化成 150px 宽高比），会变成一整块黑。属性比 CSS 弱，样式正常时
+  // 仍由 CSS 决定，所以留着不影响观感。
   const svg = `
-<svg class="vs-curve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+<svg class="vs-curve" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" aria-hidden="true">
   <line class="axis" x1="0" y1="${y(0.5)}" x2="${W}" y2="${y(0.5)}"/>
   <line class="axis" x1="0" y1="${y(1)}" x2="${W}" y2="${y(1)}"/>
   <line class="axis" x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}"/>
-  <path class="passive" d="${path(curve.passive)}"/>
-  <path class="sched" d="${path(curve.scheduled)}"/>
+  <path class="passive" fill="none" d="${path(curve.passive)}"/>
+  <path class="sched" fill="none" d="${path(curve.scheduled)}"/>
 </svg>`;
   return {
     svg,

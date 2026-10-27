@@ -209,6 +209,34 @@ ok(
         ' —— 修法：加进 tools/build-plugin.py 的 CORE_EXPORTS',
 );
 
+// ─────────────────────────────────────────────────────────────
+// 10) 样式丢了的时候，界面不许变成灾难
+//
+// 2026-10-27 真机事故：面板突然被一个巨大的黑色实心圆盖住（还叠到侧栏上）。
+// 复现方式是把插件自己的样式表关掉 —— 于是：
+//   · <svg> 没有 width/height 就撑满父容器；
+//   · <circle>/<path> 没有 fill="none" 就退回 SVG 默认的黑色填充。
+// 两条叠起来，68px 的进度环就成了一整屏黑。样式表会不会丢不由我们控制
+// （宿主热重载、挂进 ShadowRoot、页签搬家都可能），所以图形本身必须自带兜底。
+// ─────────────────────────────────────────────────────────────
+console.log('\n=== 10) SVG 自带尺寸与 fill 兜底（样式丢失时不炸）===');
+ok(/class="vs-ring"[^>]*width="48"[^>]*height="48"/.test(t), '进度环 svg 带 width/height 属性');
+ok(/class="track"[^>]*fill="none"/.test(t), '进度环 track 圆带 fill="none"（不然默认黑填充）');
+ok(/class="arc"[^>]*fill="none"/.test(t), '进度环 arc 圆带 fill="none"');
+ok(/class="vs-curve"[^>]*height="\$?\{?H/.test(t) || /class="vs-curve"[^>]*height="86"/.test(t), '曲线 svg 带 height 属性');
+ok(/class="passive" fill="none"/.test(t) && /class="sched" fill="none"/.test(t), '曲线两条 path 带 fill="none"');
+
+console.log('\n=== 11) 样式注入能认出"挂错树"和"空壳" ===');
+const injIdx = t.indexOf('function injectVocabStudyCss');
+const injBody = injIdx >= 0 ? t.slice(injIdx, injIdx + 1600) : '';
+ok(/function injectVocabStudyCss\(doc, root\)/.test(t), '接受 root 参数（面板在 ShadowRoot 里时要挂到那棵树上）');
+ok(/getRootNode/.test(injBody), '用 getRootNode 找面板实际所在的树');
+ok(/removeChild/.test(injBody), '发现 <style> 只剩空壳时移除并重注入（不再"看到标签就 return"）');
+ok(
+  /typeof injectVocabStudyCss === 'function'\) injectVocabStudyCss\(undefined, root\)/.test(t),
+  'render 里每次都确认一遍样式（丢了能自愈）',
+);
+
 console.log(`\n${bad === 0 ? '✅ 全部通过' : `❌ ${bad} 项未通过`}`);
 process.exit(bad === 0 ? 0 : 1);
 
