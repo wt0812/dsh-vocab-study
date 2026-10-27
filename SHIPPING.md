@@ -285,6 +285,12 @@ description:
 
 不声明也行：市场会退而从 README 里抽图。
 
+> ⚠️ **`assets/screenshot-1-capsule.png` 和 `screenshot-2-panel.png` 现在是真界面截图**
+> （2026-10-27 换的：一张是全工作区+左侧眼熟小组件，一张是卡片背面）。
+> 但 `tools/make-screenshots.mjs` 会**重新生成并覆盖这两个文件**（它画的是带演示字幕的合成图）。
+> 所以：**不要随手跑 `npm run screenshots`**，除非你就是要换回合成图。
+> 市场详情页从仓库 HEAD 实时读 `screenshots.json`，改完推到远端市场就会跟着变，不用发版。
+
 ---
 
 ## 发布 npm

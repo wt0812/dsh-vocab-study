@@ -73,11 +73,15 @@ python tools/install.py
 
 **① 输入框旁那颗胶囊**（`conversation.input.right`，排在「权限」与「模型」之间）：
 
-![输入框旁的胶囊](assets/screenshot-1-capsule.png)
+![输入框旁的胶囊，以及左侧栏底部的眼熟小组件](assets/screenshot-1-capsule.png)
 
-**② 右侧栏里的面板**（`sidebar.right.pane.tab`，四个页签：今日 / 进度 / 生词本 / 设置）：
+> 胶囊当时显示成「3 词收好」；左侧栏底部那张「今天背过的词 abandon」是 0.3.1 加的眼熟小组件。
 
-![右侧栏里的面板](assets/screenshot-2-panel.png)
+**② 右侧栏里的面板 · 卡片背面**（`sidebar.right.pane.tab`，四个页签：今日 / 进度 / 生词本 / 设置）：
+
+![右侧栏面板的卡片背面：词根词缀、同族词、例句](assets/screenshot-2-panel.png)
+
+> 这张特意截的是背面 —— 词根词缀、同族词、例句，0.2.8 之后卡片才有这些。
 
 | 位置 | 内容 |
 |---|---|
