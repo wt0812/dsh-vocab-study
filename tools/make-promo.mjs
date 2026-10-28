@@ -14,7 +14,12 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const PORT = 9234;
+// Windows 会把一批端口段保留给 Hyper-V/WinNAT，落在里面的端口 bind() 直接报
+// WSAEACCES(0x271D)，Chrome 只说 "Cannot start http server for devtools"，脚本就卡在
+// 「CDP 没起来」。9234 正好在 9198-9297 里，所以留个 env 覆盖口子。
+//   查看本机被占的段：netsh interface ipv4 show excludedportrange protocol=tcp
+//   跑的时候：$env:PROMO_CDP_PORT='18734'
+const PORT = Number(process.env.PROMO_CDP_PORT ?? 9234);
 const outDir = resolve(process.argv[2] ?? '_promo');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(outDir, { recursive: true });

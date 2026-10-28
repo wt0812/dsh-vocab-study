@@ -35,13 +35,13 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 项 | 说明 |
 |---|---|
-| 版本 | `0.3.2`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
+| 版本 | `0.3.3`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
 | 成熟度 | 功能可用、**在真界面里逐条点过**；13 套件 / 约 600 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
-| 体积 | `lib/client.js` 5,674,364 B ≈ **5.41 MB**（内含六本词库共 **34,216** 词，见[为什么这么大](#构建)） |
+| 体积 | `lib/client.js` 5,677,324 B ≈ **5.41 MB**（内含六本词库共 **34,216** 词，见[为什么这么大](#构建)） |
 | 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
 | 国内镜像 | [gitee.com/wutong2005/dsh-vocab-study](https://gitee.com/wutong2005/dsh-vocab-study)（**与 GitHub 逐提交一致**，见下） |
-| 市场收录 | 已提 PR [awesome-dsh-plugin#7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043)，**等上游合并** |
+| 市场收录 | 已被第三方市场 dshmarket **收录**（[PR #7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043) 于 2026-10-17 合并） |
 | 已知缺口 | 见[已知缺口](#已知缺口诚实清单)（8 条，含"未在真实网络环境验证词库拉取"这种） |
 
 ### 国内镜像（Gitee）
@@ -49,7 +49,7 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 GitHub 在国内时常连不上，所以有一份 Gitee 镜像：**https://gitee.com/wutong2005/dsh-vocab-study**
 
 它和 GitHub **逐提交一致**（HEAD sha 相同，全部提交 + 标签都在）。
-我在两边的克隆里各跑过 12 个套件，都是 0 失败。
+我在两边的克隆里各跑过 13 个套件（605 条断言），都是 0 失败。
 
 从 Gitee 装的做法是「先克隆，再装本地目录」（`dsh plugin` 没有 `gitee:` 这种形态）：
 
@@ -65,7 +65,7 @@ python tools/install.py
 > **镜像不是自动同步的**，是我推的。一切以 GitHub 为准。
 
 > 「成熟度」这一行我写得很克制：**能用**是真的（你亲手点过），
-> 但它是 0.2.9、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
+> 但它是 0.3.3、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
 
 ---
 
@@ -75,7 +75,8 @@ python tools/install.py
 
 ![输入框旁的胶囊，以及左侧栏底部的眼熟小组件](assets/screenshot-1-capsule.png)
 
-> 胶囊当时显示成「3 词收好」；左侧栏底部那张「今天背过的词 abandon」是 0.3.1 加的眼熟小组件。
+> 整个工作区的截图：左边栏底部那张「今天背过的词 ablaze」是 0.3.1 加的眼熟小组件，
+> 右边是它在对话里怎么被用起来。词库选的是托福，所以一轮只有 3 个词。
 
 **② 右侧栏里的面板 · 卡片背面**（`sidebar.right.pane.tab`，四个页签：今日 / 进度 / 生词本 / 设置）：
 
@@ -133,6 +134,11 @@ python tools/install.py
 
 **新词安全阀**（规格 §7.6）：今天新词错得太多时自动停新词。这是安全阀不是拦路虎 ——
 它仍然自动触发，但界面上给一个「我还是想继续」，用户自己决定要不要开。
+
+![一轮走完的今日页：这一轮走完了、今天已背 3 词、三条出路，下面是今天背过的词](assets/screenshot-7-round.png)
+
+> 走完不是空白页：上面写清这一轮走完、今天已背几个词，下面把**今天背过的词**列出来，再给三条出路。
+> （这张和上面两张一样是真界面截图；其余四张是脚本从 demo 里拍的。）
 
 ---
 
@@ -509,14 +515,17 @@ node test/collocations.test.mjs
 > 现在 `test/` 不进包，`test/core.test.mjs` 里有一条断言守着这件事（会红那种）。
 > **要跑测试就克隆仓库**，`test/` 和源码都在那里。
 
-**「591 条断言」是怎么数的**（口径写在这里，免得下次自己都对不上）：
+**「600 条断言」是怎么数的**（口径写在这里，免得下次自己都对不上）：
 跑 `node tools/count-assertions.mjs` 现算，**每个套件打印的汇总数字 + 该套件
-「健全性附加检查」里 ✓ 的条数**。
+「健全性附加检查」里 ✓ 的条数**。它数的是 **12 个套件 = 600 条**；
+第 13 个套件 `test/eye-candy.test.mjs`（5 条，只打 ✓ 不打汇总）还没进那个列表，
+所以全量跑（`node tools/make-promo.mjs _promo --count`）是 **13 个套件 / 605 条**。
+对外统一说「13 个套件 / 约 600 条断言」。
 
 > 为什么不是只数汇总行：`core.test.mjs` 先打印 `85 通过 / 0 失败`，**之后**才跑一段
 > 附加体检，那些 ✓ 不在汇总里。只抓汇总的话，附加检查里加多少条、数字都不动 ——
 > 我吃过这个亏：新加了 8 条断言，总数还是 372，一度以为没生效。
-> 现算明细：`core=108  demo-boot=62  round-control=107  mount=33  plugin=33  bundle-audit=28  client-activation=18  multi-conversation=13  roots=90  weekly-report=26  examples-etym=44  collocations=29`。
+> 现算明细：`core=108  demo-boot=62  round-control=107  mount=33  plugin=33  bundle-audit=37  client-activation=18  multi-conversation=13  roots=90  weekly-report=26  examples-etym=44  collocations=29  eye-candy=5`。
 
 ### CI
 
@@ -525,7 +534,7 @@ node test/collocations.test.mjs
 
 1. **仓库确实零依赖** —— 出现 `node_modules` 就红（装插件本来也不需要它）；
 2. **提交的产物是最新的** —— 重新构建后 `lib/` 有 diff 就红（靠上面那条确定性构建才成立）；
-3. **十二个套件全过** + 命名空间清单守卫；
+3. **十三个套件全过** + 命名空间清单守卫；
 4. **市场收录要的字段没坏** —— `dsh.bundle.patch` 指向的文件真的存在、`dsh.client.platform` 仍是 `web`。
 
 > 第 2 条以前是**做不了**的：构建时间戳用 `datetime.now()`，重新构建必然差一行，
