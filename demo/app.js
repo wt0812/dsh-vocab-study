@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-10-27T09:03:40Z
+ * 构建时间：2026-11-10T09:58:34Z
  */
 'use strict';
 
@@ -436,16 +436,31 @@ function pickDistractors(target, pool, { confusions = {}, count = 3, rand = Math
   const head = scored.slice(0, Math.max(count, 8));
   const picked = [];
   const bag = head.slice();
+  // 抽不中的先搁一边（spill），bag 抽空了再回来补。
+  //
+  // ⚠️ 绝对不要 "放回 bag 再抽一次"（2026-11-10 修的 bug）：放回去 bag 长度不变、
+  // picked 也不增长，一旦 head 里的候选全落在同一个 (sim, score) 桶，while 条件恒真
+  // → **同步死循环**，插件跑在宿主页面里，锁的是整个 GUI 的主线程，用户只能强杀。
+  // 而且这不是边角：similarity() 用元音折叠骨架，better/batter/bitter/butter 全塌成
+  // 同形，top-8 同桶是常态 —— 实测 cet4 4491 个词里 184 个（4.1%）必挂，
+  // 含 a / able / after / any / book / content / attain / already / apart / away。
+  // 现在的写法每次迭代必然从 bag 里永久取走一个，循环有上界（≤ head.length 次）。
+  const spill = [];
   while (picked.length < count && bag.length) {
     const idx = Math.floor(rand() * bag.length);
     // 优先取相似度不重复的，让三个干扰项各占一个维度
     const cand = bag.splice(idx, 1)[0];
-    if (picked.some((p) => Math.abs(p.sim - cand.sim) < 0.02 && Math.abs(p.score - cand.score) < 1) && bag.length) {
-      bag.push(cand);
-      if (bag.length <= 1) break;
+    if (picked.some((p) => Math.abs(p.sim - cand.sim) < 0.02 && Math.abs(p.score - cand.score) < 1)) {
+      spill.push(cand);
       continue;
     }
     picked.push(cand);
+  }
+  // 维度实在岔不开（同桶）：从 spill 里按原顺序补。它们仍然是 top-8 里"真难"的候选，
+  // 只是和已选的重了维度 —— 比硬从全库里抓一个一眼假的强。
+  for (const s of spill) {
+    if (picked.length >= count) break;
+    picked.push(s);
   }
   // 兜底：不够就从剩余里硬补
   for (const s of scored) {

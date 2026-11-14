@@ -666,6 +666,90 @@ if (fail === 0) {
     })(),
   ]);
 
+  /**
+   * 辨词出题不许空转（2026-11-10 修 F-001）。
+   *
+   * 为什么需要这条：pickDistractors 原来在"候选撞桶"时会把候选 push 回 bag，
+   * bag 和 picked 的长度都不变 → 一旦 top-8 全落在同一个 (sim, score) 桶，就是**同步
+   * 死循环**。插件跑在宿主页面里，死的是整个 GUI 的主线程，用户只能强杀标签页。
+   * 而 similarity() 用元音折叠骨架，better/batter/bitter 同形，同桶是常态 ——
+   * 实测 cet4 里 184 个词（4.1%）必挂，a / able / book / any 这些高频词都在名单里。
+   *
+   * 断言怎么写：直接测"挂不挂"会挂住 CI（同步死循环里定时器根本不跑），
+   * 所以给 rand 装计数器 —— 抽签超过上限就抛错，把死循环变成可断言的失败。
+   */
+  extras.push([
+    '辨词出题不会空转：同桶候选 + 真实词库抽样都能在有限次抽签内出题',
+    (() => {
+      const LIMIT = 500;
+      const run = (target, pool) => {
+        let n = 0;
+        const rand = () => {
+          if (++n > LIMIT) throw new Error(`抽签 ${LIMIT} 次还没凑够干扰项（死循环）`);
+          return 0; // 固定取第 0 个：最坏情况下也必须是"取走就不再回来"
+        };
+        const picked = MK.pickDistractors(target, pool, { count: 3, rand });
+        return { picked, calls: n };
+      };
+
+      // (a) 退化池：8 个候选的 (sim, score) 全同一桶 —— 修之前这里必挂
+      const same = Array.from({ length: 8 }, (_, i) => ({ id: `same${i}`, word: 'batter' }));
+      let a;
+      try {
+        a = run({ id: 'target', word: 'batter' }, same);
+      } catch (err) {
+        console.log(`      ↑ 同桶池：${err.message}`);
+        return false;
+      }
+      if (a.picked.length !== 3) {
+        console.log(`      ↑ 同桶池只选出 ${a.picked.length} 个干扰项（要 3 个）`);
+        return false;
+      }
+      if (new Set(a.picked.map((w) => w.id)).size !== 3) {
+        console.log('      ↑ 同桶池选出了重复的干扰项');
+        return false;
+      }
+
+      // (b) 真实词库：每 25 个抽一个 + 审查点名的危险词，逐词出题
+      const seed = L.seedFor('cet4');
+      const byWord = new Map(seed.map((w) => [String(w.word).toLowerCase(), w]));
+      const targets = seed.filter((_, i) => i % 25 === 0);
+      const seenId = new Set(targets.map((w) => w.id));
+      for (const risk of ['a', 'able', 'after', 'any', 'book', 'content', 'attain', 'agriculture', 'already', 'apart', 'away', 'banner']) {
+        const hit = byWord.get(risk);
+        if (hit && !seenId.has(hit.id)) { targets.push(hit); seenId.add(hit.id); }
+      }
+
+      let worst = 0;
+      for (const target of targets) {
+        let r;
+        try {
+          r = run(target, seed);
+        } catch (err) {
+          console.log(`      ↑ 「${target.word}」：${err.message}`);
+          return false;
+        }
+        if (r.picked.length !== 3) {
+          console.log(`      ↑ 「${target.word}」只选出 ${r.picked.length} 个干扰项`);
+          return false;
+        }
+        const ids = new Set(r.picked.map((w) => w.id));
+        if (ids.has(target.id)) {
+          console.log(`      ↑ 「${target.word}」把词条自己选成了干扰项`);
+          return false;
+        }
+        if (ids.size !== 3) {
+          console.log(`      ↑ 「${target.word}」选出了重复的干扰项`);
+          return false;
+        }
+        worst = Math.max(worst, r.calls);
+      }
+
+      console.log(`      ${targets.length} 个词，最多抽签 ${worst} 次（上限 ${LIMIT}）`);
+      return true;
+    })(),
+  ]);
+
   console.log('\n健全性附加检查：');
   let extraFail = 0;
   for (const [name, ok] of extras) {
