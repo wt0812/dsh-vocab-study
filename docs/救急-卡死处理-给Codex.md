@@ -4,15 +4,16 @@
 > 目标：让卡死的 DSH 恢复正常，且**不丢背单词进度**。
 > 编写时间：2026-11-14。所有命令都在 Windows PowerShell 下验证过。
 
-## 太长不看（三条路，选一条）
+## 太长不看（四条路，选一条）
 
 | 路径 | 前提 | 命令 |
 |---|---|---|
-| **A. 从 Gitee 装**（推荐） | 有 git、能上网 | `dsh plugin --profile desktop add "git+https://gitee.com/wutong2005/dsh-vocab-study.git#v0.3.4"` |
-| **B. 用作者给的 tgz 装**（最稳） | 有那个 3.2 MB 的文件 | `dsh plugin --profile desktop add "<tgz 的路径>"` |
+| **0. 直接从 npm 装**（最省事，推荐） | 能上网 | `dsh plugin --profile desktop add dsh-vocab-study@0.3.4` |
+| **A. 从 Gitee 装** | 有 git、能上网 | `dsh plugin --profile desktop add "git+https://gitee.com/wutong2005/dsh-vocab-study.git#v0.3.4"` |
+| **B. 用作者给的 tgz 装**（完全离线） | 有那个 3.2 MB 的文件 | `dsh plugin --profile desktop add "<tgz 的路径>"` |
 | **C. 先停用止血** | 上面都不行 | 见 §7（DSH 能开，但没有背单词面板，进度不丢） |
 
-三条都要求：**先完全关掉 DSH**（§2），**装完重新打开**。装完用 §4 的三行验证（版本 / 字节 / 哈希）。
+四条都要求：**先完全关掉 DSH**（§2），**装完重新打开**。装完用 §4 的三行验证（版本 / 字节 / 哈希）。
 
 ---
 
@@ -28,7 +29,9 @@
 
 **修复版本是 0.3.4**（同一批词全部跑过：卡死 0 次、数量不对 0 次、单次最多抽签 8 次）。
 
-⚠️ 0.3.4 **还没发到 npm**。所以本方案不用 npm，有两条替代通道：
+✅ 0.3.4 **已经发布到 npm（2026-11-14）**，所以最省事的就是第 0 条：`dsh plugin --profile desktop add dsh-vocab-study@0.3.4`。
+
+下面 A、B 两条是备选（npm 装不上 / 网不通 / 想离线装时用）：
 
 1. 从 Gitee 的 git tag 装 —— 那个仓库里 `lib/client.js` 是编译好并提交进 git 的成品，拉下来就能跑（§4）
 2. 用作者打好的 `dsh-vocab-study-0.3.4.tgz` 离线装 —— 不需要 git、不需要联网（§4-B）
@@ -98,7 +101,21 @@ Get-ChildItem "$env:LOCALAPPDATA\Programs","C:\Program Files","C:\Program Files 
 
 ---
 
-## 4. 第三步：装上修好的 0.3.4（主方案，推荐）
+## 4. 第三步（0 路 · 最省事）：直接从 npm 装
+
+```powershell
+dsh plugin --profile desktop add dsh-vocab-study@0.3.4
+```
+
+- `desktop` 换成 §3 查到的 profile 名
+- 正常十几秒，输出里出现 `+ dsh-vocab-study 0.3.4`
+- 装完直接跳到本节的「装完立刻验证」三行（就在下面 §4-A 末尾），再按 §5 重开 DSH
+
+> 这条走的是公共 npm 源。如果卡住不动 / 报网络错误，换 A 路（§4-A）或 B 路（§4-B）。
+
+---
+
+## 4-A. A 路：从 Gitee 的 git tag 装（npm 不通时用）
 
 ```powershell
 dsh plugin --profile desktop add "git+https://gitee.com/wutong2005/dsh-vocab-study.git#v0.3.4"
@@ -144,8 +161,8 @@ Select-String -Path "$p\package.json" -Pattern '"version"' | ForEach-Object { $_
 
 | 项 | 值 |
 |---|---|
-| 文件名 | `dsh-vocab-study-0.3.4.tgz`（3,270,802 字节） |
-| SHA1 | `5a80f042a070476fa0e052af6b17bfb5f0518ef7` |
+| 文件名 | `dsh-vocab-study-0.3.4.tgz`（3,271,383 字节，与 npm 上发布的包逐字节一致） |
+| SHA1 | `067dda48aa0bb472622dcffa22adfb2622811188` |
 | 包内 `lib/client.js` | 5,678,409 字节，SHA256 `EF4D5168B95B062B58C6B657E1C81F0516C2C36FF11E14DF0ED763C3F5C93F3A` |
 
 **做法：**
@@ -157,7 +174,7 @@ Select-String -Path "$p\package.json" -Pattern '"version"' | ForEach-Object { $_
 (Get-FileHash "$env:USERPROFILE\Downloads\dsh-vocab-study-0.3.4.tgz" -Algorithm SHA1).Hash.ToLower()
 ```
 
-必须等于 `5a80f042a070476fa0e052af6b17bfb5f0518ef7`。
+必须等于 `067dda48aa0bb472622dcffa22adfb2622811188`。
 
 3. 关掉 DSH（§2），然后装：
 
