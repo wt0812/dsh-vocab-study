@@ -1,12 +1,18 @@
-"""在 Gitee 上建 v0.3.2 发行版（Release），正文与 GitHub 同一份。
+"""在 Gitee 上建发行版（Release），正文与 GitHub 同一份。
 
-凭据来源：git 的 credential.helper=manager（Windows 凭据管理器）里已保存的
-Gitee HTTPS 凭据 —— 用 `git credential fill` 取出来直接用，**不打印、不落盘**。
+凭据来源：环境变量 `GITEE_TOKEN` / `GITEE_ACCESS_TOKEN`（推荐），或 git 的
+credential.helper=manager（Windows 凭据管理器）里已保存的 Gitee HTTPS 凭据 ——
+用 `git credential fill` 取出来直接用，**不打印、不落盘**。
 
-用法: python tools/make-gitee-release.py [--dry-run]
+用法: python tools/make-gitee-release.py [tag] [--dry-run]
+      tag 省略时取本地最新的 git tag；标题取 docs/releases/<tag>.md 首行。
+
+例：python tools/make-gitee-release.py v0.3.3 --dry-run
 """
 import io
 import json
+import os
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -17,10 +23,34 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 OWNER = "wutong2005"
 REPO = "dsh-vocab-study"
-TAG = "v0.3.2"
-TITLE = "v0.3.2 · 修复换词库后设置页状态行重叠"
-BODY_FILE = "docs/releases/v0.3.2.md"
 API = f"https://gitee.com/api/v5/repos/{OWNER}/{REPO}"
+
+
+def resolve_tag(argv):
+    """取要发布的 tag：命令行第一个非选项参数，否则本地最新 tag。"""
+    for arg in argv:
+        if not arg.startswith('-'):
+            return arg
+    r = subprocess.run(
+        ["git", "describe", "--tags", "--abbrev=0"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        raise SystemExit("取不到最新的 git tag：" + (r.stderr or "").strip()[:200])
+    return r.stdout.strip()
+
+
+def release_body(tag):
+    """读发行说明正文，并用首行拼出标题（`0.3.3：…` → `v0.3.3 · …`）。"""
+    path = f"docs/releases/{tag}.md"
+    if not os.path.exists(path):
+        raise SystemExit(f"没有发行说明：{path}")
+    body = io.open(path, encoding="utf-8").read()
+    first = next((line.strip() for line in body.splitlines() if line.strip()), tag)
+    first = re.sub(r'^#+\s*', '', first)
+    first = re.sub(r'\s*[：:]\s*', ' · ', first, count=1)
+    title = first if first.startswith('v') else f"v{first}"
+    return title, body
 
 
 def credential():
@@ -31,7 +61,6 @@ def credential():
     （实测 401 "Access token does not exist"），所以最终要用的还是私人令牌。
     令牌在 https://gitee.com/profile/personal_access_tokens 生成，勾 `projects` 权限。
     """
-    import os
     tok = (os.environ.get("GITEE_TOKEN") or os.environ.get("GITEE_ACCESS_TOKEN") or "").strip()
     if tok:
         return "(env)", tok
@@ -74,6 +103,10 @@ def call(method, path, token, params=None, payload=None):
 
 def main():
     dry = "--dry-run" in sys.argv
+    tag = resolve_tag(sys.argv[1:])
+    if not re.fullmatch(r'v?\d+\.\d+\.\d+', tag):
+        raise SystemExit(f"tag 格式不对：{tag}（要 v0.3.3 这种）")
+    title, body = release_body(tag)
     user, token = credential()
     print(f"  凭据: 用户 {user}，令牌长度 {len(token)}（不显示内容）")
 
@@ -83,20 +116,19 @@ def main():
         return 1
     existing = {r.get("tag_name"): r for r in releases} if isinstance(releases, list) else {}
     print(f"  现有发行版 {len(existing)} 个: {', '.join(sorted(existing)) or '（无）'}")
-    if TAG in existing:
-        r = existing[TAG]
-        print(f"  ⏭ {TAG} 已存在（id={r.get('id')}）→ {r.get('html_url')}")
+    if tag in existing:
+        r = existing[tag]
+        print(f"  ⏭ {tag} 已存在（id={r.get('id')}）→ {r.get('html_url')}")
         return 0
 
-    body = io.open(BODY_FILE, encoding="utf-8").read()
-    print(f"  正文 {len(body)} 字符（{BODY_FILE}），标题：{TITLE}")
+    print(f"  正文 {len(body)} 字符（docs/releases/{tag}.md），标题：{title}")
     if dry:
         print("  --dry-run：不提交")
         return 0
 
     status, res = call("POST", "/releases", token, payload={
-        "tag_name": TAG,
-        "name": TITLE,
+        "tag_name": tag,
+        "name": title,
         "body": body,
         "target_commitish": "main",
         "prerelease": False,
