@@ -194,6 +194,22 @@ export function createLocalStorage({ namespace = NS, now = () => Date.now(), onD
         return [];
       }
     },
+    /**
+     * 删掉一个键。
+     *
+     * 为什么需要：词表缓存曾经把**打包进产物**的内置词库也整份写进 localStorage
+     * （4,491 个词 ≈ 1.26 MB / 本），换几本词库就撑满配额。清缓存要能真删掉，
+     * 否则老用户那几 MB 永远赖着不走（只"忽略不读"不够）。
+     */
+    remove(key) {
+      mem.delete(key);
+      if (!ls) return;
+      try {
+        ls.removeItem(k(key));
+      } catch {
+        /* 忽略 */
+      }
+    },
     renewLock,
     /** 主动放锁（窗口关闭/面板销毁）。 */
     releaseLock() {
@@ -231,6 +247,10 @@ export function createMemoryStorage() {
     },
     list(key) {
       return (lists.get(key) || []).slice();
+    },
+    remove(key) {
+      map.delete(key);
+      lists.delete(key);
     },
     renewLock() {},
     releaseLock() {},

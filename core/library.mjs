@@ -287,8 +287,16 @@ export async function loadCollection(collection, { fetcher = null, cache = null,
   const cacheKey = `wordlist:${collection}`;
 
   // 1) 缓存优先：过了就不再联网（§4.2 第 4 条「面板内只读缓存，绝不实时请求」）
+  //
+  // ⚠️ 只认「从网络取回来的」缓存。老版本把**打包进产物**的内置词库也整份写进了
+  // localStorage（cet4 一本 ≈ 1.26 MB），等于把手里已经有的东西再存一遍：
+  //   · 白占配额（实测换到第二本词库就 4.91 MB，第三本开始写不进去）
+  //   · 冷启动还要多解析一份 1.26 MB 的 JSON
+  // 所以 source === 'seed' 的缓存一律当脏数据：不认，并且顺手删掉（老用户自动瘦身）。
   const cached = cache ? await cache.get(cacheKey) : null;
-  if (cached && Array.isArray(cached.words) && cached.words.length) {
+  const cacheIsSeedCopy = !!(cached && cached.source === 'seed');
+  if (cacheIsSeedCopy && typeof cache.del === 'function') await cache.del(cacheKey);
+  if (cached && !cacheIsSeedCopy && Array.isArray(cached.words) && cached.words.length) {
     if (onChunk) onChunk({ words: cached.words, done: true, fromCache: true });
     return { words: cached.words, source: 'cache', offline: false, partial: !!cached.partial, failedBatches: [] };
   }
@@ -346,7 +354,9 @@ export async function loadCollection(collection, { fetcher = null, cache = null,
     source = 'seed';
   }
 
-  if (cache) await cache.set(cacheKey, { words, source, partial, savedTs: Date.now(), failedBatches });
+  // 只缓存**联网取回来的**词表。内置种子本来就在产物里（seedFor 直接读打包数据），
+  // 再往 localStorage 存一份纯属自我复制：1.26 MB/本、换库累积、冷启动还多解析一次。
+  if (cache && source !== 'seed') await cache.set(cacheKey, { words, source, partial, savedTs: Date.now(), failedBatches });
   if (onChunk) onChunk({ words: words.slice(0, FIRST_CHUNK), done: true, source });
   return {
     words,
@@ -520,11 +530,111 @@ export function lookupWord(word, preferCollection = null) {
   };
 }
 
+/**
+ * 「没背过的词」长什么样。
+ *
+ * e=0.3 是**先验**（区分「真会」与「未校准」—— 规格 §5.4），不是用户数据。
+ * 关键认识：一条记忆如果除了这两个时间戳以外全是这里的值，它就等于
+ * **没有任何信息**——词库里有几个词就该长几条，不该占磁盘。
+ *
+ * 起因（2026-11-15 实测）：4,491 个词全量种子 ≈ 981 KB，每次答题都整份重写；
+ * 换一次词库再多一份（实测 cet4→cet6 就撑到 4.91 MB，第三本开始写不进去）。
+ */
+export const MEM_SEED = {
+  e: 0.3,
+  difficulty: 0.3,
+  stability: 0,
+  correct: 0,
+  wrong: 0,
+  hintCount: 0,
+  hintRate: 0,
+  reactionMs: 3500,
+  encodeCount: 0,
+  lastSeenTs: 0,
+  firstSeenTs: 0,
+  lastQuizCorrectTs: null,
+};
+
+export function newSeedMemory(ts = 0) {
+  return { ...MEM_SEED, lastSeenTs: ts, firstSeenTs: ts };
+}
+
+/** 这条记忆有没有「用户真的动过」的痕迹（含同轮重训、错频等）。 */
+export function memTouched(m) {
+  if (!m) return false;
+  return !!(
+    m.encodeCount ||
+    m.correct ||
+    m.wrong ||
+    m.hintCount ||
+    m.hintRate ||
+    m.lastQuizCorrectTs ||
+    m.nextMode ||
+    m.stability ||
+    Number(m.e) !== MEM_SEED.e
+  );
+}
+
+/** 老数据里没记「哪天种的」→ 从纯种子条目里取最早的那个 firstSeenTs 兜底。 */
+export function deriveSeededAt(mem = {}) {
+  let ts = null;
+  for (const m of Object.values(mem || {})) {
+    if (memTouched(m)) continue;
+    const t = Number(m && m.firstSeenTs);
+    if (Number.isFinite(t) && (ts === null || t < ts)) ts = t;
+  }
+  return ts;
+}
+
+/**
+ * 把落盘的记忆还原成「完整记忆表」。
+ *
+ * 落盘只存**动过的词**（见 compactMemories），没动过的词靠规则重建：
+ * 全部用**这本词库第一次载入的时刻**当 lastSeenTs/firstSeenTs。
+ *
+ * 为什么非要这个时间戳而不是 now()：种子的时间戳会参与调度
+ * （记忆强度随天数衰减，纯种子条目过了几天会变「薄弱」进复习层）。
+ * 每次重开都刷成 now() 就等于让没背过的词永远不老 —— 实测第 4 天选词
+ * 会从「15 张复习 + 5 张新词」变成「20 张新词」，这是**行为改变**，不能顺手做。
+ *
+ * @returns {{mem: object, seededAt: object}} seededAt 是「每个词库哪天种的」时间表
+ */
+export function restoreMemories(words, saved = {}, seededAtByColl = {}, collection = '', now = Date.now()) {
+  const prev = seededAtByColl || {};
+  const ts = Number.isFinite(Number(prev[collection]))
+    ? Number(prev[collection])
+    : (deriveSeededAt(saved) ?? now);
+  const mem = {};
+  // 别的词库的「纯种子」条目一律不继承：它们没信息量，留着只会越攒越胖。
+  for (const [id, m] of Object.entries(saved || {})) {
+    if (memTouched(m)) mem[id] = m;
+  }
+  for (const w of words) {
+    if (!mem[w.id]) mem[w.id] = newSeedMemory(ts);
+  }
+  return { mem, seededAt: { ...prev, [collection]: ts } };
+}
+
+/**
+ * 落盘前的瘦身：只留「动过的词」。
+ *
+ * 例外：种子时间戳对不上的条目要留着 —— 生词本里后加的词就属于这种
+ * （它们不是和词库一起种的，重建时按词库时间戳会算错年龄）。
+ */
+export function compactMemories(mem = {}, seededAtByColl = {}, collection = '') {
+  const ts = seededAtByColl ? seededAtByColl[collection] : undefined;
+  const out = {};
+  for (const [id, m] of Object.entries(mem || {})) {
+    if (memTouched(m) || m.firstSeenTs !== ts) out[id] = m;
+  }
+  return out;
+}
+
 /** 给词库种入初始记忆（e=0.3，区分「真会」与「未校准」—— 规格 §5.4）。 */
 export function seedMemories(words, existing = {}, now = Date.now()) {
   const mem = { ...existing };
   for (const w of words) {
-    if (!mem[w.id]) mem[w.id] = { e: 0.3, difficulty: 0.3, stability: 0, correct: 0, wrong: 0, hintCount: 0, hintRate: 0, reactionMs: 3500, encodeCount: 0, lastSeenTs: now, firstSeenTs: now, lastQuizCorrectTs: null };
+    if (!mem[w.id]) mem[w.id] = newSeedMemory(now);
   }
   return mem;
 }

@@ -984,7 +984,7 @@ body { margin: 0; background: #14120F; }
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-11-10T09:58:34Z
+ * 构建时间：2026-11-16T09:56:59Z
  */
 'use strict';
 
@@ -1425,8 +1425,10 @@ function pickDistractors(target, pool, { confusions = {}, count = 3, rand = Math
   // picked 也不增长，一旦 head 里的候选全落在同一个 (sim, score) 桶，while 条件恒真
   // → **同步死循环**，插件跑在宿主页面里，锁的是整个 GUI 的主线程，用户只能强杀。
   // 而且这不是边角：similarity() 用元音折叠骨架，better/batter/bitter/butter 全塌成
-  // 同形，top-8 同桶是常态 —— 实测 cet4 4491 个词里 184 个（4.1%）必挂，
-  // 含 a / able / after / any / book / content / attain / already / apart / away。
+  // 同形，top-8 同桶是常态 —— 精确判据是「top-8 里可分辨的桶少于 3 个」，
+  // 在完整四级词库上实测 2,302 / 4,491 个词（**51.3%**）必挂（2026-11-15 复算；
+  // 早先这份注释里写的 184 个 / 4.1% 是错的，低估了 12 倍 —— 正是这个低估让
+  // "只影响 4% 的边角" 显得不值得先修）。
   // 现在的写法每次迭代必然从 bag 里永久取走一个，循环有上界（≤ head.length 次）。
   const spill = [];
   while (picked.length < count && bag.length) {
@@ -81481,8 +81483,16 @@ async function loadCollection(collection, { fetcher = null, cache = null, retrie
   const cacheKey = `wordlist:${collection}`;
 
   // 1) 缓存优先：过了就不再联网（§4.2 第 4 条「面板内只读缓存，绝不实时请求」）
+  //
+  // ⚠️ 只认「从网络取回来的」缓存。老版本把**打包进产物**的内置词库也整份写进了
+  // localStorage（cet4 一本 ≈ 1.26 MB），等于把手里已经有的东西再存一遍：
+  //   · 白占配额（实测换到第二本词库就 4.91 MB，第三本开始写不进去）
+  //   · 冷启动还要多解析一份 1.26 MB 的 JSON
+  // 所以 source === 'seed' 的缓存一律当脏数据：不认，并且顺手删掉（老用户自动瘦身）。
   const cached = cache ? await cache.get(cacheKey) : null;
-  if (cached && Array.isArray(cached.words) && cached.words.length) {
+  const cacheIsSeedCopy = !!(cached && cached.source === 'seed');
+  if (cacheIsSeedCopy && typeof cache.del === 'function') await cache.del(cacheKey);
+  if (cached && !cacheIsSeedCopy && Array.isArray(cached.words) && cached.words.length) {
     if (onChunk) onChunk({ words: cached.words, done: true, fromCache: true });
     return { words: cached.words, source: 'cache', offline: false, partial: !!cached.partial, failedBatches: [] };
   }
@@ -81540,7 +81550,9 @@ async function loadCollection(collection, { fetcher = null, cache = null, retrie
     source = 'seed';
   }
 
-  if (cache) await cache.set(cacheKey, { words, source, partial, savedTs: Date.now(), failedBatches });
+  // 只缓存**联网取回来的**词表。内置种子本来就在产物里（seedFor 直接读打包数据），
+  // 再往 localStorage 存一份纯属自我复制：1.26 MB/本、换库累积、冷启动还多解析一次。
+  if (cache && source !== 'seed') await cache.set(cacheKey, { words, source, partial, savedTs: Date.now(), failedBatches });
   if (onChunk) onChunk({ words: words.slice(0, FIRST_CHUNK), done: true, source });
   return {
     words,
@@ -81712,11 +81724,110 @@ function lookupWord(word, preferCollection = null) {
   };
 }
 
+/**
+ * 「没背过的词」长什么样。
+ *
+ * e=0.3 是**先验**（区分「真会」与「未校准」—— 规格 §5.4），不是用户数据。
+ * 关键认识：一条记忆如果除了这两个时间戳以外全是这里的值，它就等于
+ * **没有任何信息**——词库里有几个词就该长几条，不该占磁盘。
+ *
+ * 起因（2026-11-15 实测）：4,491 个词全量种子 ≈ 981 KB，每次答题都整份重写；
+ * 换一次词库再多一份（实测 cet4→cet6 就撑到 4.91 MB，第三本开始写不进去）。
+ */
+const MEM_SEED = {
+  e: 0.3,
+  difficulty: 0.3,
+  stability: 0,
+  correct: 0,
+  wrong: 0,
+  hintCount: 0,
+  hintRate: 0,
+  reactionMs: 3500,
+  encodeCount: 0,
+  lastSeenTs: 0,
+  firstSeenTs: 0,
+  lastQuizCorrectTs: null,
+};
+function newSeedMemory(ts = 0) {
+  return { ...MEM_SEED, lastSeenTs: ts, firstSeenTs: ts };
+}
+
+/** 这条记忆有没有「用户真的动过」的痕迹（含同轮重训、错频等）。 */
+function memTouched(m) {
+  if (!m) return false;
+  return !!(
+    m.encodeCount ||
+    m.correct ||
+    m.wrong ||
+    m.hintCount ||
+    m.hintRate ||
+    m.lastQuizCorrectTs ||
+    m.nextMode ||
+    m.stability ||
+    Number(m.e) !== MEM_SEED.e
+  );
+}
+
+/** 老数据里没记「哪天种的」→ 从纯种子条目里取最早的那个 firstSeenTs 兜底。 */
+function deriveSeededAt(mem = {}) {
+  let ts = null;
+  for (const m of Object.values(mem || {})) {
+    if (memTouched(m)) continue;
+    const t = Number(m && m.firstSeenTs);
+    if (Number.isFinite(t) && (ts === null || t < ts)) ts = t;
+  }
+  return ts;
+}
+
+/**
+ * 把落盘的记忆还原成「完整记忆表」。
+ *
+ * 落盘只存**动过的词**（见 compactMemories），没动过的词靠规则重建：
+ * 全部用**这本词库第一次载入的时刻**当 lastSeenTs/firstSeenTs。
+ *
+ * 为什么非要这个时间戳而不是 now()：种子的时间戳会参与调度
+ * （记忆强度随天数衰减，纯种子条目过了几天会变「薄弱」进复习层）。
+ * 每次重开都刷成 now() 就等于让没背过的词永远不老 —— 实测第 4 天选词
+ * 会从「15 张复习 + 5 张新词」变成「20 张新词」，这是**行为改变**，不能顺手做。
+ *
+ * @returns {{mem: object, seededAt: object}} seededAt 是「每个词库哪天种的」时间表
+ */
+function restoreMemories(words, saved = {}, seededAtByColl = {}, collection = '', now = Date.now()) {
+  const prev = seededAtByColl || {};
+  const ts = Number.isFinite(Number(prev[collection]))
+    ? Number(prev[collection])
+    : (deriveSeededAt(saved) ?? now);
+  const mem = {};
+  // 别的词库的「纯种子」条目一律不继承：它们没信息量，留着只会越攒越胖。
+  for (const [id, m] of Object.entries(saved || {})) {
+    if (memTouched(m)) mem[id] = m;
+  }
+  for (const w of words) {
+    if (!mem[w.id]) mem[w.id] = newSeedMemory(ts);
+  }
+  return { mem, seededAt: { ...prev, [collection]: ts } };
+}
+
+/**
+ * 落盘前的瘦身：只留「动过的词」。
+ *
+ * 例外：种子时间戳对不上的条目要留着 —— 生词本里后加的词就属于这种
+ * （它们不是和词库一起种的，重建时按词库时间戳会算错年龄）。
+ */
+function compactMemories(mem = {}, seededAtByColl = {}, collection = '') {
+  const ts = seededAtByColl ? seededAtByColl[collection] : undefined;
+  const out = {};
+  for (const [id, m] of Object.entries(mem || {})) {
+    if (memTouched(m) || m.firstSeenTs !== ts) out[id] = m;
+  }
+  return out;
+}
+
 /** 给词库种入初始记忆（e=0.3，区分「真会」与「未校准」—— 规格 §5.4）。 */
 function seedMemories(words, existing = {}, now = Date.now()) {
   const mem = { ...existing };
   for (const w of words) {
-    if (!mem[w.id]) mem[w.id] = { e: 0.3, difficulty: 0.3, stability: 0, correct: 0, wrong: 0, hintCount: 0, hintRate: 0, reactionMs: 3500, encodeCount: 0, lastSeenTs: now, firstSeenTs: now, lastQuizCorrectTs: null };
+    if (!mem[w.id]) mem[w.id] = newSeedMemory(now);
   }
   return mem;
 }
@@ -83391,6 +83502,14 @@ function createApp(ports = {}) {
     dayKey: Q.dayKey(now()),
     words: [],
     mem: {},
+    /**
+     * 「每个词库是哪天种的」时间表 { collectionId: ts }。
+     *
+     * 为什么要记：落盘的 mem 只存**动过的词**（没动过的等于没信息量），
+     * 没动过的词重开时要按**当初种下的那一刻**重建，不能按 now() 重建 ——
+     * 否则没背过的词永远不老，选词结果会变（实测第 4 天：15 复习 + 5 新 → 20 新）。
+     */
+    memSeededAt: {},
     confusions: {},
     personal: [],
     records: [],
@@ -83541,6 +83660,8 @@ function createApp(ports = {}) {
     const saved = (await storage.get('state')) || {};
     state.settings = normalizeSettings(saved.settings);
     state.mem = saved.mem || {};
+    // 「每个词库哪天种的」（见 state.memSeededAt 的说明）；老数据没有这张表，下面兜底推。
+    state.memSeededAt = saved.memSeededAt || {};
     state.confusions = saved.confusions || {};
     state.personal = saved.personal || [];
     state.streak = { current: 0, longest: 0, lastDay: null, totalDays: 0, ...(saved.streak || {}) };
@@ -83548,10 +83669,9 @@ function createApp(ports = {}) {
     state.exp = saved.exp || 0;
     state.pause = saved.pause || null;
     // 打卡历史：热力图（heatmap() 遍历 state.records）与「今日已背几词」都看这里。
-    // 它一直靠 storage.append('records', row) 追加写盘，但这边**从来没读回来过** ——
-    // 于是每一次重启/重开面板，热力图与今日统计都归零，像刚装好一样。
-    // （真插件走 JSONL，demo 走 localStorage，两条路的 list() 语义一致。）
-    state.records = typeof storage.list === 'function' ? storage.list('records') : [];
+    // 按天分片存（见 appendRecord），读的时候只取最近 400 天；老用户的整表在这里
+    // 一次性拆成分片并删掉老键 —— 所以这条读路径同时承担了迁移。
+    state.records = await loadRecords();
     // history 是 persist() 一直在写、这边却漏读的另一个字段：
     // 「连续 3 天完成 → 自动回到 N」（effectiveBaseN）要靠 history.days。
     state.history = saved.history || { days: [] };
@@ -83564,7 +83684,14 @@ function createApp(ports = {}) {
     const coll = state.settings.collections?.[0] || 'cet4';
     const res = await L.loadCollection(coll, { fetcher: ports.fetcher, cache: cachePort() });
     state.words = mergePersonal(res.words, state.personal);
-    state.mem = L.seedMemories(state.words, state.mem, now());
+    /*
+     * 记忆还原：**只有动过的词**是从盘上来的，其余按「这本词库哪天种的」重建。
+     * 换掉原来的 seedMemories(words, saved.mem) —— 那条路会把 4,491 个词的
+     * 纯种子条目一起读回来再整份写回去（实测 981 KB / 每次答题都重写）。
+     */
+    const restoredMem = L.restoreMemories(state.words, state.mem, state.memSeededAt, coll, now());
+    state.mem = restoredMem.mem;
+    state.memSeededAt = restoredMem.seededAt;
     state.offline = res.offline;
     state.banner = res.banner;
     state.librarySource = res.source;
@@ -83668,6 +83795,8 @@ function createApp(ports = {}) {
     return {
       get: (k) => storage.get(`cache:${k}`),
       set: (k, v) => storage.set(`cache:${k}`, v),
+      // 老版本把内置词库也缓存进 localStorage（1.26 MB/本），要能真删掉。
+      del: (k) => storage.remove?.(`cache:${k}`),
     };
   }
 
@@ -84216,7 +84345,93 @@ function createApp(ports = {}) {
     };
     state.records.push(row);
     // 追加写，不可变（P5：每答完一张卡即落盘）
-    storage.append('records', row);
+    appendRecord(row);
+  }
+
+  /*
+   * ── 答题记录：按天分片存 ──────────────────────────────────
+   *
+   * 原来是一条 `storage.append('records', row)`：读**整张表** → push → 整表写回。
+   * 成本随历史线性涨（实测：1,000 条 3.0 ms / 5,000 条 13.8 ms / 8,000 条 21.9 ms），
+   * 而且表没有上限 —— 一天 20 个词，一年 7,300 条。
+   *
+   * 现在按 dayKey 分成 `records:2026-11-15` 这样的片，只重写**今天**这一片；
+   * 另存一个 `records:index` 记住有哪些天。读的时候只读最近 400 天
+   * （热力图 15 周、周报、今日统计全在这个窗口里），老片子直接删掉。
+   *
+   * 迁移：老用户盘上那张整表在读的时候拆成按天分片、然后删掉老键（一次性，自动）。
+   */
+  const RECORDS_LEGACY = 'records';
+  const RECORDS_INDEX = 'records:index';
+  const RECORDS_PREFIX = 'records:';
+  const RECORDS_KEEP_DAYS = 400;
+  /** 写盘串成一条链，保证两次快速作答不会互相覆盖（读-改-写必须有序）。 */
+  let recordQueue = Promise.resolve();
+
+  function enqueueRecordWrite(fn) {
+    recordQueue = recordQueue.then(fn).catch(() => {});
+    return recordQueue;
+  }
+
+  async function loadRecords() {
+    const legacy = typeof storage.list === 'function' ? storage.list(RECORDS_LEGACY) : [];
+    const rawIdx = await storage.get(RECORDS_INDEX);
+    let idx = Array.isArray(rawIdx) ? rawIdx.slice() : [];
+    const days = idx.slice(-RECORDS_KEEP_DAYS);
+    const rows = [];
+    for (const day of days) {
+      const part = await storage.get(`${RECORDS_PREFIX}${day}`);
+      if (Array.isArray(part)) rows.push(...part);
+    }
+    if (Array.isArray(legacy) && legacy.length) {
+      // 老格式搬家：按天切开写成分片，然后删掉老键。
+      const byDay = new Map();
+      for (const r of legacy) {
+        const day = (r && r.dayKey) || state.dayKey;
+        if (days.includes(day)) continue; // 已经在新分片里的不重复搬
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(r);
+      }
+      if (byDay.size) {
+        for (const [day, part] of byDay) {
+          await storage.set(`${RECORDS_PREFIX}${day}`, part);
+          rows.push(...part);
+        }
+        idx = [...new Set([...idx, ...byDay.keys()])].sort();
+        await storage.set(RECORDS_INDEX, idx.slice(-RECORDS_KEEP_DAYS));
+      }
+      storage.remove?.(RECORDS_LEGACY);
+    }
+    rows.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    return rows;
+  }
+
+  function appendRecord(row) {
+    const day = row.dayKey || state.dayKey;
+    enqueueRecordWrite(async () => {
+      const key = `${RECORDS_PREFIX}${day}`;
+      const cur = await storage.get(key);
+      const part = Array.isArray(cur) ? cur : [];
+      part.push(row);
+      await storage.set(key, part);
+      const rawIdx = await storage.get(RECORDS_INDEX);
+      const idx = Array.isArray(rawIdx) ? rawIdx.slice() : [];
+      let changed = false;
+      if (!idx.includes(day)) {
+        idx.push(day);
+        idx.sort();
+        changed = true;
+      }
+      // 清掉超出保留窗口的老分片。这一步**不能**只在"今天第一次落笔"时做 ——
+      // 索引可能是从老数据/别的版本搬过来的，一进门就该按窗口裁一遍。
+      if (idx.length > RECORDS_KEEP_DAYS) {
+        for (const old of idx.splice(0, idx.length - RECORDS_KEEP_DAYS)) {
+          storage.remove?.(`${RECORDS_PREFIX}${old}`);
+        }
+        changed = true;
+      }
+      if (changed) await storage.set(RECORDS_INDEX, idx);
+    });
   }
 
   // ── 统计 ────────────────────────────────────────────────
@@ -84477,7 +84692,12 @@ function createApp(ports = {}) {
     state.settings = normalizeSettings({ ...state.settings, collections: [coll] });
     state.words = mergePersonal(res.words, state.personal);
     // 只对新词库的词补记忆种子；已有记忆原样保留（换库不该清掉学习记录）
-    state.mem = L.seedMemories(state.words, state.mem, now());
+    //
+    // 「按哪天种的」这一步换库时**不能刷新**：这本词库上次是 10-01 载入的，
+    // 它那批没背过的种子就该从 10-01 开始算年龄。只有第一次载入这本词库才记 now()。
+    const restoredMem = L.restoreMemories(state.words, state.mem, state.memSeededAt, coll, now());
+    state.mem = restoredMem.mem;
+    state.memSeededAt = restoredMem.seededAt;
     state.offline = res.offline;
     state.banner = res.banner;
     state.librarySource = res.source;
@@ -84715,9 +84935,19 @@ function createApp(ports = {}) {
   }
 
   function persist() {
+    // 当前词库 id（记忆瘦身要知道「这本词库哪天种的」）
+    const memColl = state.settings?.collections?.[0] || 'cet4';
     storage.set('state', {
       settings: state.settings,
-      mem: state.mem,
+      /*
+       * ⚠️ 这里存的是**瘦身后的记忆**：只留动过的词 + 种子时间对不上的词。
+       * 没动过的词等于「零信息」，重建时按 memSeededAt 补回来即可。
+       *
+       * 改之前这里直接写 state.mem —— 4,491 个词的纯种子条目 ≈ 981 KB，
+       * 每答一张卡整份重写一遍（实测 6.8 ms），换几本词库就把 localStorage 撑满。
+       */
+      mem: L.compactMemories(state.mem, state.memSeededAt, memColl),
+      memSeededAt: state.memSeededAt,
       confusions: state.confusions,
       personal: state.personal,
       streak: state.streak,
@@ -84856,7 +85086,7 @@ const ETD = { ETYM, ETYM_COVERAGE };
 const WND = { WN_DERIVATION, WN_COVERAGE };
 const CLD = { COLLOCATIONS, COLLOC_COVERAGE };
 const RT = { decompose, morphOf, relativesOf, rootFamiliesOf, rootLine, examplesOf, originOf, collocationsOf };
-const L = { COLLECTIONS, SOURCES, FIRST_CHUNK, parseWordlist, loadCollection, seedFor, seedMemories, extractWordsFromText, isPureEnglish, contextSentence, lookupWord, familyOf, SEED_CET4 };
+const L = { COLLECTIONS, SOURCES, FIRST_CHUNK, parseWordlist, loadCollection, seedFor, seedMemories, extractWordsFromText, isPureEnglish, contextSentence, lookupWord, familyOf, SEED_CET4, MEM_SEED, newSeedMemory, memTouched, deriveSeededAt, restoreMemories, compactMemories };
 const SP = { speechAvailable, speak, stopSpeaking, speechSupportedLanguages };
 const HK = { HOOK_SOURCE, HOOK_MAX_CHARS, buildHook, buildHooks, createHookCache };
 const Q = { DAY_START_HOUR, dayKey, dayStartTs, daysBetweenKeys, priorDayKey, containerSize, comebackCopy, buildDailyContainer, explain, badgesFor, emptyState, CHECKIN_RATIO, isCheckedIn, bumpStreak, isPaused, effectiveBaseN, TIER, seededRandom, seededShuffle, shouldBlockNew };

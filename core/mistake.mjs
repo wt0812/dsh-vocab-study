@@ -220,8 +220,10 @@ export function pickDistractors(target, pool, { confusions = {}, count = 3, rand
   // picked 也不增长，一旦 head 里的候选全落在同一个 (sim, score) 桶，while 条件恒真
   // → **同步死循环**，插件跑在宿主页面里，锁的是整个 GUI 的主线程，用户只能强杀。
   // 而且这不是边角：similarity() 用元音折叠骨架，better/batter/bitter/butter 全塌成
-  // 同形，top-8 同桶是常态 —— 实测 cet4 4491 个词里 184 个（4.1%）必挂，
-  // 含 a / able / after / any / book / content / attain / already / apart / away。
+  // 同形，top-8 同桶是常态 —— 精确判据是「top-8 里可分辨的桶少于 3 个」，
+  // 在完整四级词库上实测 2,302 / 4,491 个词（**51.3%**）必挂（2026-11-15 复算；
+  // 早先这份注释里写的 184 个 / 4.1% 是错的，低估了 12 倍 —— 正是这个低估让
+  // "只影响 4% 的边角" 显得不值得先修）。
   // 现在的写法每次迭代必然从 bag 里永久取走一个，循环有上界（≤ head.length 次）。
   const spill = [];
   while (picked.length < count && bag.length) {

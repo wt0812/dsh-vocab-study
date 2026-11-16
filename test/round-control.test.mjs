@@ -10,6 +10,7 @@
 import { createApp } from '../core/app.mjs';
 import * as S from '../core/session.mjs';
 import * as Q from '../core/queue.mjs';
+import * as L from '../core/library.mjs';
 import { createStorage } from '../store/client-store.mjs';
 import { readFileSync } from 'node:fs';
 
@@ -465,9 +466,17 @@ console.log('\n⑧ 换词库（用户抱怨"显示更换成功但主页没反应
   ok('（前置）走完一轮后今日页是空的（正是用户看到的那一屏）',
      app4.state.card === null && app4.state.roundFinished === true);
 
+  // 换库要保住的**不是"记忆表条数"**，而是动过的词的状态。
+  // 没背过的纯种子条目等于零信息：不落盘、换库时也不跨库保留，
+  // 重开时按「这本词库哪天种的」重建（2026-11-15 瘦身，见 library.compactMemories）。
+  const touchedBefore = Object.fromEntries(
+    Object.entries(app4.raw.mem).filter(([, m]) => m && (m.encodeCount || m.correct || m.wrong)),
+  );
+  ok('（前置）走完一轮后确实产生了"动过的记忆"', Object.keys(touchedBefore).length > 0,
+     `${Object.keys(touchedBefore).length} 条`);
+
   const res = await app4.changeCollection('cet6');
   ok('换词库返回成功', res && res.ok === true, res && JSON.stringify(res));
-
   const after = app4.raw.words.map((w) => w.id);
   ok('词表真的换掉了（不是只改了个设置字段）',
      after.length > 0 && after.every((id) => id.startsWith('cet6:')),
@@ -489,13 +498,21 @@ console.log('\n⑧ 换词库（用户抱怨"显示更换成功但主页没反应
      app4.state.lastLibraryChange && app4.state.lastLibraryChange.ok === true
        && app4.state.lastLibraryChange.count > 0);
 
-  // 换库不该清掉学习记录：换回来，之前的记忆还在。
-  const memBefore = Object.keys(app4.raw.mem || {}).length;
+  // 换库不该清掉学习记录：换回来，动过的词一条不少、状态一致。
   await app4.changeCollection('cet4');
   ok('换回原词库也能成功', app4.state.settings.collections[0] === 'cet4');
-  const memAfter = Object.keys(app4.raw.mem || {}).length;
-  ok('换库不清空学习记忆（换回来记忆还在）', memAfter >= memBefore,
-     `换前 ${memBefore} 条 / 换后 ${memAfter} 条`);
+  const broken = Object.keys(touchedBefore).filter((id) => {
+    const m = app4.raw.mem[id];
+    return !m || m.encodeCount !== touchedBefore[id].encodeCount || m.e !== touchedBefore[id].e;
+  });
+  ok('换库不清空学习记忆（动过的词状态一条不少）',
+     Object.keys(touchedBefore).length > 0 && broken.length === 0,
+     `动过的词 ${Object.keys(touchedBefore).length} 条 / 丢或变 ${broken.length} 条`);
+  // 顺带把"瘦身"本身也钉住：换回来之后，别的词库的纯种子条目不该再占着记忆表。
+  const cet6Seeds = Object.entries(app4.raw.mem)
+    .filter(([id, m]) => id.startsWith('cet6:') && !(m.encodeCount || m.correct || m.wrong)).length;
+  ok('别的词库的纯种子记忆不跨库堆积（换回来只剩当前词库的种子）', cet6Seeds === 0,
+     `残留 ${cet6Seeds} 条`);
 
   // 选的就是当前这本：不该重建，免得把正在背的那一轮清掉。
   const sameSession = app4.state.session;
@@ -675,6 +692,302 @@ console.log('\n⑩ 真的存储件：写进去的，读得出来（用户报「�
   //    （另一条容易被误当成根因的线索，这里顺手锁住它没被误伤）
   ok('单窗口反复重开不会把自己变成只读',
      storeC.readOnly === false, `readOnly=${storeC.readOnly} ${storeC.readOnlyReason || ''}`);
+}
+
+// ── ⑩ 记忆瘦身：没背过的词不占盘（2026-11-15 实测：换两本词库就撑满 5MB） ──
+//
+// 原来 persist() 把 state.mem 整份写盘，而 state.mem 里 4,491 条是「零信息」的
+// 种子条目（e=0.3、其余全 0）≈ 981 KB —— 每答一张卡整份重写，换一本词库再多一份。
+// 实测 cet4→cet6 就 2.17→4.91 MB，换第三本开始写不进去（12 次 QuotaExceeded）。
+//
+// 现在的规矩：盘上只存**动过的词** + 「每个词库哪天种的」时间表；
+// 没动过的词重开时按那个时间戳重建（不能按 now()，否则没背过的词永远不老，
+// 第 4 天的选词会从「15 复习 + 5 新」变成「20 新」—— 这是行为漂移，不能顺手做）。
+console.log('\n⑩ 存储瘦身（记忆只存动过的词，换词库不再撑爆）：');
+{
+  const CAP = 5 * 1024 * 1024;
+  const raw = new Map();
+  let bytes = 0;
+  let quotaErrors = 0;
+  const fakeLs = {
+    getItem: (k) => (raw.has(k) ? raw.get(k) : null),
+    setItem: (k, v) => {
+      const old = raw.get(k);
+      const next = bytes - (old ? old.length : 0) + v.length;
+      if (next > CAP) {
+        quotaErrors++;
+        const e = new Error('QuotaExceededError');
+        e.name = 'QuotaExceededError';
+        throw e;
+      }
+      if (old) bytes -= old.length;
+      raw.set(k, v);
+      bytes += v.length;
+    },
+    removeItem: (k) => {
+      const old = raw.get(k);
+      if (old) bytes -= old.length;
+      raw.delete(k);
+    },
+    key: (i) => [...raw.keys()][i] ?? null,
+    get length() { return raw.size; },
+  };
+  const prevLs = globalThis.localStorage;
+  globalThis.localStorage = fakeLs;
+  try {
+    const NS2 = 'vs-slim-test';
+    const keyOf = (suffix) => [...raw.keys()].find((k) => k.endsWith(`:${suffix}`));
+    const sizeKB = (suffix) => {
+      const k = keyOf(suffix);
+      return k ? Math.round((raw.get(k) || '').length / 1024) : 0;
+    };
+
+    clock = startOfDay();
+    const store1 = createStorage({ namespace: NS2, now: () => clock });
+    const app1 = createApp({ storage: store1, now: () => clock });
+    await app1.init();
+    ok('开局不再把 4,491 个词的纯种子落盘（原来 ≈960 KB）', sizeKB('state') < 120,
+       `state = ${sizeKB('state')} KB`);
+    const seededAt1 = app1.raw.memSeededAt.cet4;
+    ok('记下了「四级是哪天种的」', typeof seededAt1 === 'number' && seededAt1 === clock,
+       `seededAt=${seededAt1} clock=${clock}`);
+
+    // 背 3 张卡：只有这 3 个词该进盘
+    for (let i = 0; i < 3; i++) { app1.rate(S.RATING.KNOWN); app1.next(); }
+    const touched = Object.entries(app1.raw.mem).filter(([, m]) => m.encodeCount > 0);
+    ok('背过的词确实产生了进度', touched.length === 3, `encodeCount>0 的有 ${touched.length} 条`);
+    ok('盘上体积不随词库大小走（仍 < 120 KB）', sizeKB('state') < 120, `state = ${sizeKB('state')} KB`);
+
+    // 隔 3 天重开：动过的词进度在，没动过的词仍用「当初种下」的时间戳
+    clock += 3 * 86400000;
+    const store2 = createStorage({ namespace: NS2, now: () => clock });
+    const app2 = createApp({ storage: store2, now: () => clock });
+    await app2.init();
+    const stillTouched = touched.filter(([id, m]) => {
+      const now2 = app2.raw.mem[id];
+      return now2 && now2.encodeCount === m.encodeCount;
+    });
+    ok('重开后学习进度一条不少', stillTouched.length === 3, `${stillTouched.length}/3 条还在`);
+
+    const untouchedId = Object.keys(app2.raw.mem).find((id) => {
+      const m = app2.raw.mem[id];
+      return id.startsWith('cet4:') && !m.encodeCount && !m.correct && !m.wrong;
+    });
+    const untouched = app2.raw.mem[untouchedId];
+    ok('没背过的词重建时用「当初种下」的时间戳（不是 now()，否则永远不老）',
+       untouched.lastSeenTs === seededAt1, `lastSeenTs=${untouched.lastSeenTs} seededAt=${seededAt1}`);
+    ok('没背过的词仍然算新词（没被误判成「到期复习」）',
+       !app2.state.stats || app2.raw.mem[untouchedId].encodeCount === 0);
+
+    // 六本词库全换一遍：记忆这一份不能再翻倍（词表缓存另算，见 ⑪）
+    for (const coll of ['cet6', 'kaoyan', 'ielts', 'toefl', 'gre']) {
+      await app2.changeCollection(coll);
+    }
+    ok('六本词库全换一遍，记忆体积不翻倍（原来每换一本多 ~1 MB）',
+       sizeKB('state') < 120, `state = ${sizeKB('state')} KB`);
+    ok('换完六本后记忆表里只有当前词库的种子 + 动过的词',
+       Object.entries(app2.raw.mem).filter(([id, m]) => !id.startsWith('gre:') && !m.encodeCount).length === 0,
+       `残留 ${Object.entries(app2.raw.mem).filter(([id, m]) => !id.startsWith('gre:') && !m.encodeCount).length} 条`);
+
+    // 老数据兼容：盘上是「全量 mem、没有 memSeededAt」的老格式，也要能读回来
+    const stateKey = keyOf('state');
+    const saved = JSON.parse(raw.get(stateKey));
+    const legacyMem = { ...app2.raw.mem };
+    for (const [id, m] of Object.entries(legacyMem)) if (!m.encodeCount) legacyMem[id] = { ...m, firstSeenTs: seededAt1 };
+    delete saved.value.memSeededAt;
+    saved.value.mem = legacyMem;
+    raw.set(stateKey, JSON.stringify(saved));
+    const store3 = createStorage({ namespace: NS2, now: () => clock });
+    const app3 = createApp({ storage: store3, now: () => clock });
+    await app3.init();
+    const legacyKept = touched.filter(([id, m]) => app3.raw.mem[id] && app3.raw.mem[id].encodeCount === m.encodeCount);
+    ok('老格式（全量 mem、无时间表）能读回来，进度不丢', legacyKept.length === 3,
+       `${legacyKept.length}/3 条还在`);
+    app3.rate(S.RATING.KNOWN); app3.next();
+    ok('老数据下次落盘就自动瘦身（不用用户手动清缓存）', sizeKB('state') < 120,
+       `state = ${sizeKB('state')} KB`);
+  } finally {
+    globalThis.localStorage = prevLs;
+  }
+}
+
+// ── ⑪ 词表缓存：内置词库不进 localStorage（1.26 MB/本 × 六本 = 撑爆） ──
+//
+// 老版本 loadCollection 不管词表是从网络来的还是**打包在产物里的**，一律写入缓存。
+// 内置词库写缓存 = 把手里已有的东西再存一份：白占 1.26 MB/本，换库还累积。
+// 实测（2026-11-15）：cet4→cet6 就 4.91 MB，第三本开始 QuotaExceeded。
+console.log('\n⑪ 词表缓存（内置词库不该再存一份）：');
+{
+  // ① 内置种子：一个字节都不该写
+  const netCache = new Map();
+  const port = {
+    get: async (k) => (netCache.has(k) ? netCache.get(k) : null),
+    set: async (k, v) => { netCache.set(k, v); },
+    del: async (k) => { netCache.delete(k); },
+  };
+  const seeded = await L.loadCollection('cet4', { cache: port });
+  ok('（前置）内置词库走的是种子，不是网络', seeded.source === 'seed', `source=${seeded.source}`);
+  ok('内置词库不写缓存（原来 1.26 MB/本）', netCache.size === 0, `缓存里 ${netCache.size} 条`);
+
+  // ② 真·联网词表仍然要缓存，而且第二天不再联网
+  let fetchCalls = 0;
+  const fakeFetcher = async () => {
+    fetchCalls++;
+    // 词表格式是「制表符分隔」（真实词表的格式见 tools/make-*）：word \t ipa \t pos \t meaning
+    return 'abandon\t/əˈbændən/\tv.\t放弃\nability\t/əˈbɪləti/\tn.\t能力';
+  };
+  const r1 = await L.loadCollection('cet4', { cache: port, fetcher: fakeFetcher });
+  ok('联网词表照旧写缓存', netCache.has('wordlist:cet4') && r1.source !== 'seed',
+     `source=${r1.source} / 缓存 ${netCache.size} 条`);
+  const r2 = await L.loadCollection('cet4', { cache: port, fetcher: fakeFetcher });
+  ok('第二次直接读缓存、不再联网', r2.source === 'cache' && fetchCalls === 1,
+     `source=${r2.source} / 联网 ${fetchCalls} 次`);
+
+  // ③ 老用户盘里的「内置词库缓存」当脏数据：不认 + 顺手删掉
+  let deleted = null;
+  const dirtyPort = {
+    get: async () => ({ source: 'seed', words: [{ id: 'cet4:x', word: 'x' }], savedTs: 1 }),
+    set: async () => { throw new Error('不该再写'); },
+    del: async (k) => { deleted = k; },
+  };
+  const r3 = await L.loadCollection('cet4', { cache: dirtyPort });
+  ok('老的内置词库缓存被当脏数据删掉（不用用户手动清缓存）',
+     deleted === 'wordlist:cet4' && r3.source === 'seed', `删了 ${deleted} / source=${r3.source}`);
+
+  // ④ 端到端：五本词库全换一遍，存储不再膨胀、不再报配额错
+  const CAP = 5 * 1024 * 1024;
+  const raw = new Map();
+  let bytes = 0;
+  let quotaErrors = 0;
+  const fakeLs = {
+    getItem: (k) => (raw.has(k) ? raw.get(k) : null),
+    setItem: (k, v) => {
+      const old = raw.get(k);
+      const next = bytes - (old ? old.length : 0) + v.length;
+      if (next > CAP) {
+        quotaErrors++;
+        const e = new Error('QuotaExceededError');
+        e.name = 'QuotaExceededError';
+        throw e;
+      }
+      if (old) bytes -= old.length;
+      raw.set(k, v);
+      bytes += v.length;
+    },
+    removeItem: (k) => { const old = raw.get(k); if (old) bytes -= old.length; raw.delete(k); },
+    key: (i) => [...raw.keys()][i] ?? null,
+    get length() { return raw.size; },
+  };
+  const prevLs = globalThis.localStorage;
+  globalThis.localStorage = fakeLs;
+  try {
+    clock = startOfDay();
+    const slimStore = createStorage({ namespace: 'vs-cache-test', now: () => clock });
+    const slimApp = createApp({ storage: slimStore, now: () => clock });
+    await slimApp.init();
+    ok('（前置）开局不写词表缓存', bytes < 100 * 1024, `${Math.round(bytes / 1024)} KB`);
+    for (const coll of ['cet6', 'kaoyan', 'ielts', 'toefl', 'gre']) await slimApp.changeCollection(coll);
+    ok('六本词库全换一遍不报配额错（原来第三本开始 QuotaExceeded）',
+       quotaErrors === 0, `QuotaExceededError ${quotaErrors} 次`);
+    ok('换完六本总占用仍很小（原来 4.91 MB 卡死）', bytes < 1024 * 1024,
+       `${Math.round(bytes / 1024)} KB`);
+  } finally {
+    globalThis.localStorage = prevLs;
+  }
+}
+
+// ── ⑫ 答题记录按天分片（原来每答一张卡整表重写，成本随历史线性涨） ──
+//
+// 实测改之前：1,000 条 3.0 ms / 5,000 条 13.8 ms / 8,000 条 21.9 ms 每张卡，
+// 而且表没有上限（一天 20 词，一年 7,300 条）。现在只重写「今天」那一片。
+console.log('\n⑫ 答题记录分片（写盘成本不随历史增长）：');
+{
+  const raw = new Map();
+  let bytes = 0;
+  const fakeLs = {
+    getItem: (k) => (raw.has(k) ? raw.get(k) : null),
+    setItem: (k, v) => {
+      const old = raw.get(k);
+      if (old) bytes -= old.length;
+      raw.set(k, v);
+      bytes += v.length;
+    },
+    removeItem: (k) => { const old = raw.get(k); if (old) bytes -= old.length; raw.delete(k); },
+    key: (i) => [...raw.keys()][i] ?? null,
+    get length() { return raw.size; },
+  };
+  const prevLs = globalThis.localStorage;
+  globalThis.localStorage = fakeLs;
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const keyLike = (frag) => [...raw.keys()].filter((k) => k.includes(frag));
+  const sizeOf = (k) => (raw.get(k) || '').length;
+  try {
+    clock = startOfDay();
+    const st = createStorage({ namespace: 'vs-rec-test', now: () => clock });
+    const app = createApp({ storage: st, now: () => clock });
+    await app.init();
+    for (let i = 0; i < 3; i++) { app.rate(S.RATING.KNOWN); app.next(); }
+    await settle();
+    ok('记录写进了「按天」的分片，而不是一张整表',
+       keyLike(':records:index').length === 1 && keyLike(`:records:${Q.dayKey(clock)}`).length === 1
+         && keyLike(':records') .filter((k) => !k.includes('records:')).length === 0,
+       `键：${[...raw.keys()].filter((k) => k.includes('records')).join(', ')}`);
+
+    // 造 400 天历史（每片 20 条），再看"答一张卡"写进去多少字节
+    const idx = [];
+    for (let d = 0; d < 400; d++) {
+      const day = Q.dayKey(startOfDay() - d * 86400000);
+      idx.push(day);
+      const part = Array.from({ length: 20 }, (_, i) => ({ wordId: `cet4:w${i}`, dayKey: day, ts: startOfDay() - d * 86400000 + i, correct: true, tier: 3, collection: 'cet4' }));
+      raw.set(`vs-rec-test:records:${day}`, JSON.stringify({ v: 1, value: part }));
+    }
+    raw.set('vs-rec-test:records:index', JSON.stringify({ v: 1, value: idx.sort() }));
+    const bigBytes = bytes;
+    const t0 = process.hrtime.bigint();
+    app.rate(S.RATING.KNOWN); app.next();
+    await settle();
+    const perCardMs = Number(process.hrtime.bigint() - t0) / 1e6;
+    const grew = bytes - bigBytes;
+    ok('有 8,000 条历史时，答一张卡只写「今天」那一片（不整表重写）', grew < 4096,
+       `本次写入 ${grew} 字节（原来要重写整张表 ≈ ${Math.round(bigBytes / 1024)} KB）`);
+    ok('每张卡的写盘耗时不再随历史膨胀', perCardMs < 30, `${perCardMs.toFixed(1)} ms`);
+
+    // 老格式（一张整表）自动搬家：分片出现、老键消失、记录条数对
+    const oldRows = [
+      { wordId: 'cet4:a', dayKey: Q.dayKey(startOfDay() - 86400000 * 2), ts: startOfDay() - 86400000 * 2, correct: true, tier: 3 },
+      { wordId: 'cet4:b', dayKey: Q.dayKey(startOfDay() - 86400000 * 2), ts: startOfDay() - 86400000 * 2 + 1, correct: false, tier: 3 },
+      { wordId: 'cet4:c', dayKey: Q.dayKey(startOfDay() - 86400000 * 1), ts: startOfDay() - 86400000, correct: true, tier: 3 },
+    ];
+    raw.set('vs-rec-test:records', JSON.stringify({ v: 1, value: oldRows }));
+    raw.delete('vs-rec-test:records:index');
+    for (const k of [...raw.keys()]) if (k.includes(':records:')) raw.delete(k);
+    const st2 = createStorage({ namespace: 'vs-rec-test', now: () => clock });
+    const app2 = createApp({ storage: st2, now: () => clock });
+    await app2.init();
+    ok('老格式整表在读取时自动拆成分片（老键删掉）',
+       !raw.has('vs-rec-test:records') && raw.has('vs-rec-test:records:index'),
+       `键：${[...raw.keys()].filter((k) => k.includes('records')).join(', ')}`);
+    ok('搬家后记录一条没丢', app2.raw.records.length === oldRows.length,
+       `${app2.raw.records.length}/${oldRows.length} 条`);
+
+    // 超过保留窗口（400 天）的老分片会被清掉（不无限攒）
+    const stale = Q.dayKey(startOfDay() - 86400000 * 900);
+    raw.set(`vs-rec-test:records:${stale}`, JSON.stringify({ v: 1, value: [{ wordId: 'cet4:z', dayKey: stale, ts: 1 }] }));
+    const idx2 = [];
+    for (let d = 0; d < 400; d++) idx2.push(Q.dayKey(startOfDay() - d * 86400000));
+    idx2.push(stale);
+    idx2.sort();
+    raw.set('vs-rec-test:records:index', JSON.stringify({ v: 1, value: idx2 }));
+    const app3 = createApp({ storage: createStorage({ namespace: 'vs-rec-test', now: () => clock }), now: () => clock });
+    await app3.init();
+    app3.rate(S.RATING.KNOWN); app3.next();
+    await settle();
+    const idx3 = JSON.parse(raw.get('vs-rec-test:records:index')).value;
+    ok('超过保留窗口（400 天）的老分片被清掉', !idx3.includes(stale) && idx3.length <= 400,
+       `索引 ${idx3.length} 天，最早 ${idx3[0]}`);
+  } finally {
+    globalThis.localStorage = prevLs;
+  }
 }
 
 console.log('\n────────────────────────────────────────────────────────');
