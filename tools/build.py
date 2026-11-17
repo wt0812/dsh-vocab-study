@@ -118,6 +118,9 @@ CORE_ORDER = [
     ("G", "core/game.mjs"),
     ("B", "core/beckon.mjs"),
     ("S", "core/session.mjs"),
+    # 外观（字号倍率 / 背景色 → 一套 CSS 变量）。**必须排在 A 前面**：
+    # app.mjs 的 normalizeSettings 要用 normalizeAppearance。
+    ("AP", "core/appearance.mjs"),
     ("A", "core/app.mjs"),
 ]
 
@@ -176,6 +179,14 @@ CORE_EXPORTS = {
     # 两种情况我都写错过一次，各自被两个不同测试抓到：
     #   漏列 shouldBlockNew → demo-boot 报 Q.shouldBlockNew is not a function
     #   多列 restartRound   → demo-boot 报 restartRound is not defined
+    # 外观（2026-11-15）：字号档位 + 背景预设 + 任意背景色 → CSS 变量。
+    # 全是纯函数，能被 node 直接测（对比度、颜色合法性、倍率夹紧）。
+    # 后三个是「跟随主题」用的：从宿主真实渲染值里取底色/深浅
+    # （DSH 不写 documentElement.dataset.theme，老写法让面板永远深色）。
+    "AP": ["FONT_SCALES", "FONT_MIN", "FONT_MAX", "PAPER_PRESETS", "APPEARANCE_PROPS",
+           "normalizeHex", "rgbOf", "relativeLuminance", "contrastRatio", "paletteFor",
+           "fontScaleOf", "normalizeAppearance", "cssVarsFor", "hasCustomPaper",
+           "cssColorToHex", "schemeFromSignals", "cssVarsForHost"],
     "A": ["createApp"],
 }
 
@@ -192,7 +203,7 @@ UI = [
      ["injectCore", "renderProgress", "renderVocab", "renderSettings",
       "renderWeeklyReport", "heatmap", "collectionLabel"]),
     ("UI_EYE_CANDY", "ui/eye-candy.mjs", ["createEyeCandy", "EYE_CANDY_INTERVAL"]),
-    ("UI_PANEL", "ui/panel.mjs", ["createPanel"]),
+    ("UI_PANEL", "ui/panel.mjs", ["createPanel", "hostScheme", "watchHostTheme"]),
     ("UI_CAPSULE", "ui/capsule.mjs", ["createCapsule"]),
     ("UI_SHELL", "ui/shell.mjs", ["boot"]),
 ]
@@ -207,7 +218,8 @@ SYMBOL_HOME = {
     "renderSettings": "UI_PAGES", "renderWeeklyReport": "UI_PAGES", "heatmap": "UI_PAGES",
     "collectionLabel": "UI_PAGES",
     "setCore": "UI_CORE_REF", "getCore": "UI_CORE_REF",
-    "createPanel": "UI_PANEL", "createCapsule": "UI_CAPSULE",
+    "createPanel": "UI_PANEL", "hostScheme": "UI_PANEL", "watchHostTheme": "UI_PANEL",
+    "createCapsule": "UI_CAPSULE",
     "createEyeCandy": "UI_EYE_CANDY", "EYE_CANDY_INTERVAL": "UI_EYE_CANDY",
     "el": "UI_DOM", "h": "UI_DOM", "clear": "UI_DOM", "mount": "UI_DOM",
     "setText": "UI_DOM", "setClass": "UI_DOM", "toggle": "UI_DOM",
@@ -1096,6 +1108,28 @@ def build():
 </head>
 <body>
 <div id="dsh-root"></div>
+<script>
+/* 模拟 DSH 宿主的主题机制 —— 真宿主是 theme-runtime 干的这三件事：
+     1. documentElement.style.colorScheme = 'light' | 'dark'
+     2. 深色时 body 上有 data-ds-dark-theme 属性
+     3. 底色由宿主 token 决定（这里用 body 背景近似）
+   演示页默认深色；?theme=light 看浅色；?bg=F2F2EF 模拟「主题插件换了底色」。
+   有这个模拟层，才可能在浏览器里回归「跟随主题」——没有它，演示页永远深色，
+   面板跟着谁都是黑的，看上去好像"正确"。 */
+(function () {
+  var q = new URLSearchParams(location.search);
+  var theme = q.get('theme') === 'light' ? 'light' : 'dark';
+  var bg = q.get('bg');
+  document.documentElement.style.colorScheme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  if (theme === 'dark') document.body.setAttribute('data-ds-dark-theme', '');
+  else document.body.removeAttribute('data-ds-dark-theme');
+  // 底色：不给 bg 就沿用演示外壳自己的画布色（深色 #14120F，来自 demo/shell.css）；
+  // 浅色模拟时换成浅画布，不然「浅色宿主 + 深色画布」是自相矛盾的假现场。
+  if (bg) document.body.style.background = '#' + String(bg).replace(/^#/, '');
+  else if (theme === 'light') document.body.style.background = '#F7F4EE';
+})();
+</script>
 <script>
 %s
 </script>

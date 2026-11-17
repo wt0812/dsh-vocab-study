@@ -9,6 +9,9 @@
 .vs, .vs * { box-sizing: border-box; }
 
 .vs {
+  /* 字号倍率（外观设置里 0.9 / 1 / 1.15 / 1.3）。只有 font-size 乘它，
+     内外边距不动 —— 侧栏只有 340px 宽，整体缩放会把版面横着切掉。 */
+  --vs-fs: 1;
   --vs-radius: 10px;
   --vs-radius-lg: 14px;
   /* 阅读宽度上限：面板被开在宽标签页里时，内容收成一条并居中。
@@ -25,7 +28,7 @@
   --vs-away: #7C8A9A;
   --vs-away-text: #5A6774;
   font-family: var(--vs-serif);
-  font-size: 14px;
+  font-size: calc(14px * var(--vs-fs, 1));
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -85,7 +88,7 @@
   background: var(--vs-paper-2);
   color: var(--vs-ink);
   font-family: var(--vs-serif);
-  font-size: 12px;
+  font-size: calc(12px * var(--vs-fs, 1));
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -205,10 +208,10 @@
   flex: 0 0 auto;
 }
 .vs-panel.docked .vs-head { padding: 2px 0 8px; }
-.vs-title { font-size: 13px; font-weight: 600; letter-spacing: .01em; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-title { font-size: calc(13px * var(--vs-fs, 1)); font-weight: 600; letter-spacing: .01em; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vs-iconbtn {
   appearance: none; border: 0; background: transparent; cursor: pointer;
-  color: var(--vs-ink-faint); font-size: 13px; line-height: 1;
+  color: var(--vs-ink-faint); font-size: calc(13px * var(--vs-fs, 1)); line-height: 1;
   width: 24px; height: 24px; border-radius: 7px; display: inline-flex;
   align-items: center; justify-content: center; flex: 0 0 auto;
   font-family: var(--vs-serif);
@@ -218,7 +221,7 @@
 
 /* 一行灰字（离线模式 / 只读 / 另一个窗口正在学）—— 不解释（§14.5） */
 .vs-banner {
-  font-size: 11px; color: var(--vs-ink-faint);
+  font-size: calc(11px * var(--vs-fs, 1)); color: var(--vs-ink-faint);
   padding: 5px 12px; background: var(--vs-line-soft);
   flex: 0 0 auto;
 }
@@ -229,7 +232,7 @@
 .vs-panel.docked .vs-tabs { padding: 8px 0 0; }
 .vs-tab {
   appearance: none; border: 0; background: transparent; cursor: pointer;
-  font-family: var(--vs-serif); font-size: 12px; color: var(--vs-ink-faint);
+  font-family: var(--vs-serif); font-size: calc(12px * var(--vs-fs, 1)); color: var(--vs-ink-faint);
   padding: 5px 9px; border-radius: 7px;
 }
 .vs-tab:hover { background: var(--vs-hover); color: var(--vs-ink-soft); }
@@ -244,7 +247,7 @@
 
 /* 队列顶部一句话解释（§6.4）—— 只给一句话，不给数字 */
 .vs-headline {
-  font-size: 12px; color: var(--vs-ink-soft);
+  font-size: calc(12px * var(--vs-fs, 1)); color: var(--vs-ink-soft);
   padding: 2px 2px 10px;
 }
 .vs-headline b { font-weight: 600; color: var(--vs-coral-text); }
@@ -433,17 +436,17 @@
   transition: stroke-dashoffset .3s ease;
 }
 .vs-ring .pct {
-  fill: var(--vs-ink); font-size: 12.5px; font-weight: 600;
+  fill: var(--vs-ink); font-size: calc(12.5px * var(--vs-fs, 1)); font-weight: 600;
   font-family: var(--vs-mono); text-anchor: middle; dominant-baseline: central;
 }
 .vs-kpis { display: flex; gap: 26px; flex-wrap: wrap; min-width: 0; align-items: center; }
 .vs-kpi { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .vs-kpi b {
-  font-family: var(--vs-mono); font-size: 21px; font-weight: 600;
+  font-family: var(--vs-mono); font-size: calc(21px * var(--vs-fs, 1)); font-weight: 600;
   color: var(--vs-ink); letter-spacing: -.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12ch;
 }
-.vs-kpi i { font-style: normal; font-size: 11.5px; color: var(--vs-ink-faint); }
+.vs-kpi i { font-style: normal; font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); }
 .vs-deck-heat { margin-top: 16px; }
 /*
  * 一格都没学过时，整片热力图不该占地方。
@@ -460,7 +463,7 @@
 .vs-deck-heat:has(.cell[data-l="0"]):not(:has(.cell[data-l="1"])):not(:has(.cell[data-l="2"])):not(:has(.cell[data-l="3"])):not(:has(.cell[data-l="4"])) {
   display: none;
 }
-.vs-deck-heat .lbl { display: block; font-size: 11.5px; color: var(--vs-ink-faint); margin-bottom: 7px; }
+.vs-deck-heat .lbl { display: block; font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-bottom: 7px; }
 .vs-deck-heat .vs-heat { margin-top: 0; gap: 5px; }
 .vs-deck-heat .vs-heat .col { gap: 5px; }
 .vs-deck-heat .vs-heat .cell { width: 17px; height: 17px; border-radius: 3px; }
@@ -484,8 +487,8 @@
  */
 @media (max-height: 900px) {
   .vs-ringwrap, .vs-ring { width: 54px; height: 54px; }
-  .vs-kpi b { font-size: 17px; }
-  .vs-kpi i { font-size: 11px; }
+  .vs-kpi b { font-size: calc(17px * var(--vs-fs, 1)); }
+  .vs-kpi i { font-size: calc(11px * var(--vs-fs, 1)); }
   /* 降级而不是隐藏 */
   .vs-deck-heat .vs-heat { gap: 4px; }
   .vs-deck-heat .vs-heat .col { gap: 4px; }
@@ -527,7 +530,7 @@
 
 .vs-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; min-height: 0; }
 .vs-badge {
-  font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 999px;
+  font-size: calc(10.5px * var(--vs-fs, 1)); line-height: 1; padding: 3px 6px; border-radius: 999px;
   background: var(--vs-chip); color: var(--vs-ink-soft); white-space: nowrap;
 }
 .vs-badge[data-kind="new"] { color: var(--vs-jade-text); }
@@ -551,13 +554,13 @@
 }
 .vs-word:hover { color: var(--vs-coral-text); }
 .vs-word:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 3px; border-radius: 6px; }
-.vs-word .vs-audio { font-size: 12px; opacity: .45; }
+.vs-word .vs-audio { font-size: calc(12px * var(--vs-fs, 1)); opacity: .45; }
 
 .vs-ipa {
-  font-family: var(--vs-mono); font-size: 12.5px; color: var(--vs-ink-soft);
+  font-family: var(--vs-mono); font-size: calc(12.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft);
   margin-top: 2px;
 }
-.vs-hint { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 8px; font-style: italic; }
+.vs-hint { font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-top: 8px; font-style: italic; }
 
 /* 自评按钮：固定在同一个位置，眼睛不用找，手指已经在那儿（§5.2） */
 .vs-ratings {
@@ -568,7 +571,7 @@
   appearance: none; cursor: pointer; font-family: var(--vs-serif);
   border: 1px solid var(--vs-line); border-radius: var(--vs-radius);
   background: var(--vs-paper-2); color: var(--vs-ink);
-  padding: 9px 4px; font-size: 12.5px; line-height: 1.2;
+  padding: 9px 4px; font-size: calc(12.5px * var(--vs-fs, 1)); line-height: 1.2;
   transition: background .12s ease, border-color .12s ease, transform .1s ease;
 }
 .vs-rate:hover { background: var(--vs-chip); }
@@ -578,7 +581,7 @@
 .vs-rate[data-k="fuzzy"]:hover { border-color: rgba(217, 162, 59, .5); }
 .vs-rate[data-k="known"]:hover { border-color: rgba(31, 157, 143, .5); }
 .vs-rate kbd {
-  font-family: var(--vs-mono); font-size: 9.5px; opacity: .5;
+  font-family: var(--vs-mono); font-size: calc(9.5px * var(--vs-fs, 1)); opacity: .5;
   margin-left: 3px;
 }
 
@@ -586,45 +589,45 @@
 .vs-reveal { animation: vs-fade 120ms ease-out 1; }
 @keyframes vs-fade { from { opacity: 0; } to { opacity: 1; } }
 .vs-rule { height: 1px; background: var(--vs-line-soft); margin: 12px 0 10px; }
-.vs-pos { font-size: 11px; color: var(--vs-ink-faint); margin-bottom: 2px; font-family: var(--vs-mono); }
-.vs-meaning { font-size: 16px; line-height: 1.5; }
-.vs-ex { margin-top: 10px; font-size: 13px; }
+.vs-pos { font-size: calc(11px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-bottom: 2px; font-family: var(--vs-mono); }
+.vs-meaning { font-size: calc(16px * var(--vs-fs, 1)); line-height: 1.5; }
+.vs-ex { margin-top: 10px; font-size: calc(13px * var(--vs-fs, 1)); }
 .vs-ex .en { font-style: italic; }
-.vs-ex .zh { color: var(--vs-ink-soft); font-size: 12px; margin-top: 2px; }
-.vs-gray { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 10px; }
+.vs-ex .zh { color: var(--vs-ink-soft); font-size: calc(12px * var(--vs-fs, 1)); margin-top: 2px; }
+.vs-gray { font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-top: 10px; }
 .vs-gray button {
   appearance: none; border: 0; background: transparent; cursor: pointer;
-  color: var(--vs-jade-text); font-family: var(--vs-serif); font-size: 11.5px; padding: 0;
+  color: var(--vs-jade-text); font-family: var(--vs-serif); font-size: calc(11.5px * var(--vs-fs, 1)); padding: 0;
   text-decoration: underline; text-underline-offset: 2px;
 }
 
 /* 折叠项：永不自动展开（§5.2） */
 .vs-folds { margin-top: 10px; border-top: 1px solid var(--vs-line-soft); }
 .vs-fold > summary {
-  cursor: pointer; font-size: 11.5px; color: var(--vs-ink-soft);
+  cursor: pointer; font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft);
   padding: 7px 0; list-style: none; display: flex; align-items: center; gap: 5px;
 }
 .vs-fold > summary::-webkit-details-marker { display: none; }
-.vs-fold > summary::before { content: '▸'; font-size: 9px; opacity: .6; }
+.vs-fold > summary::before { content: '▸'; font-size: calc(9px * var(--vs-fs, 1)); opacity: .6; }
 .vs-fold[open] > summary::before { content: '▾'; }
-.vs-fold .vs-foldbody { font-size: 12px; color: var(--vs-ink-soft); padding: 0 0 8px 14px; }
+.vs-fold .vs-foldbody { font-size: calc(12px * var(--vs-fs, 1)); color: var(--vs-ink-soft); padding: 0 0 8px 14px; }
 .vs-fold .vs-foldbody ul { margin: 0; padding-left: 15px; }
 
 /* AI 增强区：空白 > 你点了才填（§5.2） */
 .vs-ai { margin-top: 10px; }
 .vs-ai-btn {
   appearance: none; border: 1px dashed var(--vs-line); background: transparent;
-  cursor: pointer; font-family: var(--vs-serif); font-size: 11.5px;
+  cursor: pointer; font-family: var(--vs-serif); font-size: calc(11.5px * var(--vs-fs, 1));
   color: var(--vs-jade-text); padding: 6px 10px; border-radius: 999px;
 }
 .vs-ai-btn:hover { background: var(--vs-hover); }
-.vs-ai-out { font-size: 12.5px; margin-top: 8px; padding: 9px 11px; border-radius: var(--vs-radius); background: var(--vs-chip); }
+.vs-ai-out { font-size: calc(12.5px * var(--vs-fs, 1)); margin-top: 8px; padding: 9px 11px; border-radius: var(--vs-radius); background: var(--vs-chip); }
 .vs-ai-out .hook { font-weight: 600; }
 .vs-ai-out .ex { font-style: italic; color: var(--vs-ink-soft); margin-top: 4px; }
 /* 记忆钩子的一句话 + 它的来源标注（§9：用户能看到它凭什么这么说） */
 .vs-ai-line { font-weight: 600; line-height: 1.5; }
 .vs-ai-src {
-  margin-top: 3px; font-size: 11px; color: var(--vs-ink-faint);
+  margin-top: 3px; font-size: calc(11px * var(--vs-fs, 1)); color: var(--vs-ink-faint);
   letter-spacing: .02em;
 }
 .vs-ai-out[data-state="failed"] { color: var(--vs-coral-text); }
@@ -633,7 +636,7 @@
 /* 揭晓后的行动区（下一张 / 撤销 / 其实我搞混了 / 这题有问题） */
 .vs-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; }
 .vs-btn {
-  appearance: none; cursor: pointer; font-family: var(--vs-serif); font-size: 12px;
+  appearance: none; cursor: pointer; font-family: var(--vs-serif); font-size: calc(12px * var(--vs-fs, 1));
   border: 1px solid var(--vs-line); border-radius: 999px;
   background: transparent; color: var(--vs-ink-soft); padding: 5px 11px;
 }
@@ -644,7 +647,7 @@
   padding: 6px 16px;
 }
 .vs-btn.primary:hover { filter: brightness(1.06); }
-.vs-btn.muted { border-color: transparent; font-size: 11px; color: var(--vs-ink-faint); }
+.vs-btn.muted { border-color: transparent; font-size: calc(11px * var(--vs-fs, 1)); color: var(--vs-ink-faint); }
 .vs-btn.muted:hover { color: var(--vs-ink-soft); }
 .vs-btn[disabled] { opacity: .35; cursor: default; }
 
@@ -653,13 +656,13 @@
 .vs-quiz-opt {
   appearance: none; cursor: pointer; text-align: left; font-family: var(--vs-serif);
   border: 1px solid var(--vs-line); border-radius: var(--vs-radius);
-  background: var(--vs-paper-2); color: var(--vs-ink); padding: 9px 11px; font-size: 13px;
+  background: var(--vs-paper-2); color: var(--vs-ink); padding: 9px 11px; font-size: calc(13px * var(--vs-fs, 1));
 }
 .vs-quiz-opt:hover { background: var(--vs-chip); }
 .vs-quiz-opt:focus-visible { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
 .vs-quiz-opt[data-state="right"] { border-color: rgba(31, 157, 143, .55); background: rgba(31, 157, 143, .09); }
 .vs-quiz-opt[data-state="wrong"] { border-color: rgba(255, 107, 90, .55); background: rgba(255, 107, 90, .08); }
-.vs-quiz-opt .pos { font-family: var(--vs-mono); font-size: 10px; color: var(--vs-ink-faint); margin-right: 5px; }
+.vs-quiz-opt .pos { font-family: var(--vs-mono); font-size: calc(10px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-right: 5px; }
 
 /* 答错反馈：并排两个词 + 一句人话，绝不出现红叉（§5.3） */
 .vs-pair { display: flex; gap: 8px; margin-top: 10px; }
@@ -667,16 +670,16 @@
   flex: 1 1 0; min-width: 0; padding: 9px 10px; border-radius: var(--vs-radius);
   background: var(--vs-chip);
 }
-.vs-pair .side .w { font-size: 14px; font-weight: 600; }
-.vs-pair .side .m { font-size: 11.5px; color: var(--vs-ink-soft); margin-top: 2px; }
-.vs-pair .side .i { font-family: var(--vs-mono); font-size: 10.5px; color: var(--vs-ink-faint); }
-.vs-human { font-size: 12.5px; color: var(--vs-ink-soft); margin-top: 8px; line-height: 1.5; }
+.vs-pair .side .w { font-size: calc(14px * var(--vs-fs, 1)); font-weight: 600; }
+.vs-pair .side .m { font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft); margin-top: 2px; }
+.vs-pair .side .i { font-family: var(--vs-mono); font-size: calc(10.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); }
+.vs-human { font-size: calc(12.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft); margin-top: 8px; line-height: 1.5; }
 
 /* 底部状态条 */
 .vs-foot {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px 10px; border-top: 1px solid var(--vs-line-soft);
-  font-family: var(--vs-mono); font-size: 11px; color: var(--vs-ink-faint);
+  font-family: var(--vs-mono); font-size: calc(11px * var(--vs-fs, 1)); color: var(--vs-ink-faint);
   flex: 0 0 auto;
 }
 .vs-panel.docked .vs-foot { padding: 8px 0 2px; }
@@ -687,16 +690,16 @@
 .vs-bar > i { display: block; height: 100%; background: var(--vs-coral); border-radius: 2px; transition: width .25s ease; }
 
 /* ═══════════ 进度页 ═══════════ */
-.vs-h2 { font-size: 12px; color: var(--vs-ink-faint); margin: 14px 0 6px; font-weight: 500; }
+.vs-h2 { font-size: calc(12px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin: 14px 0 6px; font-weight: 500; }
 .vs-h2:first-child { margin-top: 2px; }
-.vs-big { font-size: 30px; font-weight: 600; font-family: var(--vs-mono); letter-spacing: -.02em; }
-.vs-big small { font-size: 12px; font-family: var(--vs-serif); color: var(--vs-ink-soft); font-weight: 400; margin-left: 5px; }
-.vs-sub { font-size: 11.5px; color: var(--vs-ink-faint); margin-top: 8px; flex-shrink: 0; }
+.vs-big { font-size: calc(30px * var(--vs-fs, 1)); font-weight: 600; font-family: var(--vs-mono); letter-spacing: -.02em; }
+.vs-big small { font-size: calc(12px * var(--vs-fs, 1)); font-family: var(--vs-serif); color: var(--vs-ink-soft); font-weight: 400; margin-left: 5px; }
+.vs-sub { font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-top: 8px; flex-shrink: 0; }
 /* 换词库的结果行。三种状态必须**看得出区别** —— 用户报的就是
    「显示更换成功但主页没反应」，所以"成了/没成/为什么没成"不能长得一样。
    注意：.vs-body 是 flex column，这里作为 flex item 必须能保住自己的高度，
    否则文字会溢出并盖到下一行（见 0.3.2 修复的换库状态行重叠 bug）。 */
-.vs-collection-status { font-size: 11.5px; line-height: 1.55; margin-top: 6px; min-height: auto; flex-shrink: 0; }
+.vs-collection-status { font-size: calc(11.5px * var(--vs-fs, 1)); line-height: 1.55; margin-top: 6px; min-height: auto; flex-shrink: 0; }
 .vs-collection-status:empty { display: none; }
 .vs-collection-status[data-kind="ok"] { color: var(--vs-jade); }
 .vs-collection-status[data-kind="error"] { color: var(--vs-coral-text); }
@@ -706,7 +709,7 @@
 .vs-curve .axis { stroke: var(--vs-line); stroke-width: 1; }
 .vs-curve .sched { fill: none; stroke: var(--vs-jade); stroke-width: 2; }
 .vs-curve .passive { fill: none; stroke: var(--vs-away); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.vs-legend { display: flex; gap: 12px; font-size: 11px; color: var(--vs-ink-soft); margin-top: 4px; }
+.vs-legend { display: flex; gap: 12px; font-size: calc(11px * var(--vs-fs, 1)); color: var(--vs-ink-soft); margin-top: 4px; }
 .vs-legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 4px; }
 .vs-legend .s i { background: var(--vs-jade); }
 .vs-legend .p i { background: var(--vs-away); }
@@ -717,7 +720,7 @@
 .vs-heat .cell[data-l="2"] { background: rgba(31, 157, 143, .5); }
 .vs-heat .cell[data-l="3"] { background: rgba(31, 157, 143, .72); }
 .vs-heat .cell[data-l="4"] { background: var(--vs-jade); }
-.vs-empty { font-size: 12.5px; color: var(--vs-ink-faint); padding: 18px 2px; text-align: center; }
+.vs-empty { font-size: calc(12.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); padding: 18px 2px; text-align: center; }
 
 /* ── 一轮走完 ────────────────────────────────────────────────────
  * 用户原话：「我背完一轮后，只能显示这个，难道我就不能重新背一遍吗，
@@ -729,36 +732,36 @@
  * 背单词应用最容易犯的错就是替用户评价他自己。
  */
 .vs-round-done { padding: 22px 2px 8px; }
-.vs-done-title { font-size: 15px; color: var(--vs-ink); font-weight: 600; margin-bottom: 6px; }
-.vs-done-sub { font-size: 12.5px; color: var(--vs-ink-faint); line-height: 1.6; }
+.vs-done-title { font-size: calc(15px * var(--vs-fs, 1)); color: var(--vs-ink); font-weight: 600; margin-bottom: 6px; }
+.vs-done-sub { font-size: calc(12.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); line-height: 1.6; }
 
 /* 新词闸门：拦下来了，但把决定权交给用户本人 */
 .vs-gate {
   margin: 10px auto 0; max-width: 260px; padding: 10px 12px;
   background: var(--vs-chip); border-radius: var(--vs-radius); text-align: center;
 }
-.vs-gate-note { font-size: 11.5px; color: var(--vs-ink-soft); margin-bottom: 8px; line-height: 1.5; }
+.vs-gate-note { font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft); margin-bottom: 8px; line-height: 1.5; }
 .vs-list { display: flex; flex-direction: column; gap: 1px; }
 .vs-row {
   display: flex; align-items: baseline; gap: 8px; padding: 6px 2px;
-  border-bottom: 1px solid var(--vs-line-soft); font-size: 13px;
+  border-bottom: 1px solid var(--vs-line-soft); font-size: calc(13px * var(--vs-fs, 1));
 }
 /* 单词列**不许被压缩**：flex: 0 0 auto（原来是 flex-shrink:1，会被挤出省略号）。
  * 原来的写法没写 flex，默认 flex-shrink:1；而释义那列是 `flex:1 1 auto`，
  * 于是空间一紧张就轮到**单词**被截 —— sentinel 显示成「senti…」。
  * 单词比释义短得多，怎么轮都轮不到它被截；要截就让释义去承担。 */
 .vs-row .w { flex: 0 0 auto; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vs-row .m { color: var(--vs-ink-soft); font-size: 12px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vs-row .t { font-family: var(--vs-mono); font-size: 10.5px; color: var(--vs-ink-faint); flex: 0 0 auto; }
-.vs-report { background: var(--vs-chip); border-radius: var(--vs-radius); padding: 11px 12px; font-size: 12.5px; line-height: 1.7; }
+.vs-row .m { color: var(--vs-ink-soft); font-size: calc(12px * var(--vs-fs, 1)); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-row .t { font-family: var(--vs-mono); font-size: calc(10.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); flex: 0 0 auto; }
+.vs-report { background: var(--vs-chip); border-radius: var(--vs-radius); padding: 11px 12px; font-size: calc(12.5px * var(--vs-fs, 1)); line-height: 1.7; }
 .vs-report .k { color: var(--vs-coral-text); font-family: var(--vs-mono); font-weight: 600; }
 
 /* ═══════════ 设置页 ═══════════ */
-.vs-field { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--vs-line-soft); font-size: 12.5px; }
+.vs-field { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--vs-line-soft); font-size: calc(12.5px * var(--vs-fs, 1)); }
 .vs-field > label { flex: 1 1 auto; min-width: 0; }
-.vs-field .note { display: block; font-size: 10.5px; color: var(--vs-ink-faint); margin-top: 1px; }
+.vs-field .note { display: block; font-size: calc(10.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); margin-top: 1px; }
 .vs-select, .vs-input {
-  appearance: none; font-family: var(--vs-serif); font-size: 12px;
+  appearance: none; font-family: var(--vs-serif); font-size: calc(12px * var(--vs-fs, 1));
   background: var(--vs-paper-2); color: var(--vs-ink);
   border: 1px solid var(--vs-line); border-radius: 7px; padding: 4px 7px;
   max-width: 132px;
@@ -768,19 +771,19 @@
 
 /* 攻守天平（§6.5）：人话 + 后果实时预览 */
 .vs-scale { padding: 4px 0 2px; }
-.vs-scale .ends { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--vs-ink-soft); }
+.vs-scale .ends { display: flex; justify-content: space-between; font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft); }
 .vs-scale input[type="range"] { width: 100%; accent-color: var(--vs-coral); margin: 7px 0 3px; }
-.vs-scale .preview { font-size: 11.5px; color: var(--vs-ink-faint); text-align: center; }
+.vs-scale .preview { font-size: calc(11.5px * var(--vs-fs, 1)); color: var(--vs-ink-faint); text-align: center; }
 
 /* ═══════════ 窄窗口降级（§2.4）═══ */
 .vs.vs-compact .vs-ex { display: none; }
-.vs.vs-compact .vs-meaning { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs.vs-compact .vs-meaning { font-size: calc(15px * var(--vs-fs, 1)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vs.vs-tiny .vs-ipa,
 .vs.vs-tiny .vs-badges,
 .vs.vs-tiny .vs-hint,
 .vs.vs-tiny .vs-ex { display: none; }
-.vs.vs-tiny .vs-word { font-size: 20px; }
-.vs.vs-tiny .vs-meaning { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs.vs-tiny .vs-word { font-size: calc(20px * var(--vs-fs, 1)); }
+.vs.vs-tiny .vs-meaning { font-size: calc(13px * var(--vs-fs, 1)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vs.vs-tiny .vs-body { padding: 6px 8px 2px; }
 
 /* ═══════════ 眼熟小组件 ═══════════ */
@@ -799,7 +802,7 @@
   border-left-width: 2px;
 }
 .vs-eye-label {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--vs-fs, 1));
   color: var(--vs-ink-faint);
   margin-bottom: 5px;
 }
@@ -815,13 +818,32 @@
   border-radius: 50%;
   background: transparent;
   color: var(--vs-ink-faint);
-  font-size: 16px;
+  font-size: calc(16px * var(--vs-fs, 1));
   cursor: pointer;
 }
 .vs-eye-close:hover { color: var(--vs-ink); background: var(--vs-chip); }
-.vs-eye-word { font-size: 17px; font-weight: 700; color: var(--vs-ink); }
-.vs-eye-phonetic { font-size: 12px; color: var(--vs-ink-soft); }
-.vs-eye-meaning { font-size: 13px; color: var(--vs-ink-soft); margin-top: 3px; line-height: 1.4; }
-.vs-eye-candy-compact .vs-eye-word { font-size: 14px; display: inline; margin-right: 6px; }
+.vs-eye-word { font-size: calc(17px * var(--vs-fs, 1)); font-weight: 700; color: var(--vs-ink); }
+.vs-eye-phonetic { font-size: calc(12px * var(--vs-fs, 1)); color: var(--vs-ink-soft); }
+.vs-eye-meaning { font-size: calc(13px * var(--vs-fs, 1)); color: var(--vs-ink-soft); margin-top: 3px; line-height: 1.4; }
+.vs-eye-candy-compact .vs-eye-word { font-size: calc(14px * var(--vs-fs, 1)); display: inline; margin-right: 6px; }
 .vs-eye-candy-compact .vs-eye-phonetic { display: inline; }
-.vs-eye-candy-compact .vs-eye-meaning { font-size: 11.5px; margin-top: 4px; }
+.vs-eye-candy-compact .vs-eye-meaning { font-size: calc(11.5px * var(--vs-fs, 1)); margin-top: 4px; }
+
+/* ═══════════ 外观控件（2026-11-15）═══════════
+ * 设置页的「背景色」小方块。边框和文字都用 token：用户换成自定义底色时
+ * 这些 token 会被内联覆盖，方块也得跟着变色，否则会浮在深色底上一块白边。
+ */
+.vs-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vs-swatch {
+  width: 26px; height: 22px; padding: 0; cursor: pointer;
+  border-radius: 6px; border: 1px solid var(--vs-line); background: transparent;
+}
+.vs-swatch.auto {
+  width: auto; padding: 0 8px; font-family: var(--vs-serif);
+  font-size: calc(10.5px * var(--vs-fs, 1)); color: var(--vs-ink-soft);
+}
+.vs-swatch[aria-pressed="true"] { outline: 2px solid var(--vs-jade); outline-offset: 1px; }
+.vs-colorpick {
+  width: 34px; height: 22px; padding: 0; cursor: pointer;
+  border: 1px solid var(--vs-line); border-radius: 6px; background: transparent;
+}

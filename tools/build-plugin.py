@@ -98,6 +98,10 @@ CORE_EXPORTS = [
            "advance", "ensureNewWordCap", "undoLast", "buildQuiz", "submitQuiz",
            "humanizeConfusion", "reportFakeMastery", "pauseSession", "resumeSession",
            "snapshot", "restore"]),
+    ("AP", ["FONT_SCALES", "FONT_MIN", "FONT_MAX", "PAPER_PRESETS", "APPEARANCE_PROPS",
+           "normalizeHex", "rgbOf", "relativeLuminance", "contrastRatio", "paletteFor",
+           "fontScaleOf", "normalizeAppearance", "cssVarsFor", "hasCustomPaper",
+           "cssColorToHex", "schemeFromSignals", "cssVarsForHost"]),
     ("A", ["createApp"]),
 ]
 
@@ -108,7 +112,7 @@ CORE_NS_KEY = {
     "EXD": "examplesData", "EXWD": "examplesWikiData", "ETD": "etymData",
     "CLD": "collocData", "WND": "wordnetData",
     "L": "library", "SP": "speech", "HK": "hook",
-    "Q": "queue", "G": "game", "B": "beckon", "S": "session", "A": "app",
+    "Q": "queue", "G": "game", "B": "beckon", "S": "session", "AP": "appearance", "A": "app",
 }
 
 # 摊平顺序 = 依赖顺序。被 import 的先来。
@@ -139,6 +143,7 @@ CORE_ORDER = [
     "core/game.mjs",
     "core/beckon.mjs",
     "core/session.mjs",
+    "core/appearance.mjs",
     "core/app.mjs",
 ]
 STORE_ORDER = ["store/client-store.mjs"]

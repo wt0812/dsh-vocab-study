@@ -6,9 +6,14 @@
 // 面板注册进 sidebar.right.pane.tab —— 位置与这里的 DOM 顺序一一对应。
 
 import { createApp } from '../core/app.mjs';
-import { createPanel } from './panel.mjs';
+import { createPanel, hostScheme, watchHostTheme } from './panel.mjs';
 import { createCapsule } from './capsule.mjs';
 import { speak } from '../core/speech.mjs';
+
+/**
+ * 盯宿主主题的活函数住在 ui/panel.mjs（`watchHostTheme`）—— 真插件和 demo 共用一份，
+ * 否则就会出现「demo 里切主题跟得上、真宿主里跟不上」这种只在一边好的假象。
+ */
 
 /**
  * 启动 demo。单文件形态下由构建产物末尾调用；ESM 形态下也可直接 import 使用。
@@ -39,8 +44,7 @@ export async function boot(mountPoint) {
   }
 }
 
-async function bootInner(mp) {
-  // ── 1. 演示用的持久化（真插件里换成 JSONL + 快照，见 store/client-store.mjs）──
+async function bootInner(mp) {  // ── 1. 演示用的持久化（真插件里换成 JSONL + 快照，见 store/client-store.mjs）──
   const storage = demoStorage('vocab-study-demo');
 
   // ── 2. 让 demo「有历史」：第一次打开时补一段过去的记录，好看到连续天数 ──
@@ -152,7 +156,11 @@ async function bootInner(mp) {
   function ensurePanel() {
     if (panel) return panel;
     panel = createPanel(app, {
-      theme: document.documentElement.dataset.theme || 'dark',
+      // 注意：这里不能写成 `document.documentElement.dataset.theme || 'dark'`。
+      // DSH 的主题不写那个属性（它写 style.colorScheme + body[data-ds-dark-theme]），
+      // 那个表达式永远是 undefined → 面板永远深色，「跟随主题」等于没做（0.3.6 修）。
+      theme: hostScheme(),
+      getScheme: () => hostScheme(),
       getDocked: () => docked,
       isWide,
       onClose: () => closePanel(),
@@ -288,6 +296,9 @@ async function bootInner(mp) {
   applyWidth();
   // 刻意不自动打开面板：面板永不自作主张（P1）
   setTimeout(runStreamCycle, 1500);
+
+  // 宿主换主题时面板要跟上（含「跟随系统」时系统切了、或用户装的主题插件热更换色）
+  watchHostTheme(() => panel);
 
   // demo 专用测试口子。
   //

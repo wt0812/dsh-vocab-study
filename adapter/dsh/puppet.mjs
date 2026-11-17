@@ -11,22 +11,35 @@
 // 这样既不用为插件重写一份界面，也不会让界面逻辑渗进框架细节。
 
 import { createApp } from '../../core/app.mjs';
-import { createPanel } from '../../ui/panel.mjs';
+import { createPanel, hostScheme, watchHostTheme } from '../../ui/panel.mjs';
 import { createCapsule } from '../../ui/capsule.mjs';
 import { speak, speechAvailable, stopSpeaking } from '../../core/speech.mjs';
 import { createStorage, createMemoryStorage } from '../../store/client-store.mjs';
 
-/** 读 DSH 主题，映射成面板认的 'light' | 'dark'。读不到就按深色。 */
+/**
+ * 读 DSH 主题。
+ *
+ * 0.3.6 修过一次：原来这里读的是 `documentElement.dataset.theme` / `.light`，
+ * 但 DSH 的主题运行时**不写**这两个东西 —— 它写 `style.colorScheme` +
+ * `body[data-ds-dark-theme]`。所以那个判断永远返回 'dark'，真宿主里
+ * 「跟随主题」形同虚设、主题插件完全跟不上。
+ * 现在统一走 ui/panel.mjs 的 hostScheme()（信号强弱 + 底色亮度兜底），
+ * 这里只留一个「宿主给不出任何信号时」的兜底。
+ */
 function readTheme(root) {
   try {
-    const el = root && root.ownerDocument ? root.ownerDocument.documentElement : null;
-    if (!el) return 'dark';
-    if (el.dataset && el.dataset.theme) return el.dataset.theme === 'light' ? 'light' : 'dark';
-    if (el.classList && el.classList.contains('light')) return 'light';
+    const doc = root && root.ownerDocument ? root.ownerDocument : null;
+    // hostScheme() 读的是全局 document；挂载点属于哪个文档就临时用它
+    if (doc && typeof doc !== 'undefined' && doc !== globalThis.document) {
+      if (doc.body && doc.body.hasAttribute && doc.body.hasAttribute('data-ds-dark-theme')) return 'dark';
+      const scheme = (doc.documentElement && doc.documentElement.style && doc.documentElement.style.colorScheme) || '';
+      if (scheme === 'light' || scheme === 'dark') return scheme;
+      return 'dark';
+    }
+    return hostScheme();
   } catch {
-    /* 忽略 */
+    return 'dark';
   }
-  return 'dark';
 }
 
 /**
@@ -127,6 +140,8 @@ export function createPanelPuppet({ core, mountTo, host = {} } = {}) {
 
   const panel = createPanel(app, {
     theme,
+    // 每次渲染现问宿主是什么主题（而不是创建时定一次）
+    getScheme: () => readTheme(mountTo),
     getDocked: host.getDocked || (() => true),
     isWide: host.isWide || (() => true),
     toast: host.toast || (() => {}),
@@ -140,6 +155,10 @@ export function createPanelPuppet({ core, mountTo, host = {} } = {}) {
   });
 
   if (mountTo && typeof mountTo.appendChild === 'function') mountTo.appendChild(panel.root);
+
+  // 真宿主里切主题（设置页切浅色/深色、切「跟随系统」、主题插件热更）要即时反映到面板。
+  // 只挂在 demo 外壳里是不够的 —— 用户用的是这条路径。
+  const stopThemeWatch = watchHostTheme(() => panel);
 
   /** init 可能已经在别处跑过（胶囊先开了面板）；这里幂等。 */
   async function ensureReady() {
@@ -167,6 +186,11 @@ export function createPanelPuppet({ core, mountTo, host = {} } = {}) {
       panel.focus();
     },
     destroy() {
+      try {
+        if (typeof stopThemeWatch === 'function') stopThemeWatch();
+      } catch {
+        /* 忽略 */
+      }
       try {
         stopSpeaking();
       } catch {

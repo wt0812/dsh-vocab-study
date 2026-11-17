@@ -10,11 +10,12 @@ import * as G_ from '../core/game.mjs';
 import * as Q_ from '../core/queue.mjs';
 import * as L_ from '../core/library.mjs';
 import * as B_ from '../core/beckon.mjs';
+import * as AP_ from '../core/appearance.mjs';
 
 // core 命名空间统一走 ui/core-ref.mjs 的注册表（那里解释了为什么需要它）。
 // ESM 形态下本文件自己填一次；摊平形态下由构建脚本填，读法完全一样。
 // 必须写成单行 —— 摊平用整行剥离来去掉它，折行会漏掉。
-setCore({ memory: M_, mistake: MK_, game: G_, queue: Q_, library: L_, beckon: B_ });
+setCore({ memory: M_, mistake: MK_, game: G_, queue: Q_, library: L_, beckon: B_, appearance: AP_ });
 
 /** 兼容旧调用点：转发到注册表。 */
 export function injectCore(core) {
@@ -285,10 +286,13 @@ export function renderVocab(root, st, app) {
 }
 
 export function renderSettings(root, st, app) {
-  const { library: L, queue: Q } = getCore();
+  const { library: L, queue: Q, appearance: AP } = getCore();
   clear(root);
   const s = st.settings;
   const bal = s.balance;
+  // 外观（字号档位 + 背景色）。老数据里没有这个字段时按默认值渲染，
+  // 不写回盘 —— 保存留给用户真正动了控件那一刻。
+  const ap = s.appearance || { font: 'md', paper: 'auto' };
   const preview = previewBalance(st, app, bal);
 
   const setNum = (key) => (ev) => app.updateSettings({ [key]: Number(ev.target.value) });
@@ -407,6 +411,57 @@ export function renderSettings(root, st, app) {
         checked: s.eyeCandy?.showInSidebar ? true : null,
         onchange: (ev) => app.updateSettings({ eyeCandy: { ...s.eyeCandy, showInSidebar: !!ev.target.checked } }),
       }),
+    ]),
+
+    /*
+     * 外观（2026-11-15 用户反馈：「他想自定义背景色和字体大小」）。
+     *
+     * 两个控件都**即时生效**：改完调 updateSettings → emit → 面板重渲染，
+     * 不需要保存按钮，也不会动正在背的这一轮（appearance 不在重建白名单里）。
+     *
+     * 字号只放文字不放版面：侧栏最窄 340px，整体缩放会把版面横着切掉 ——
+     * 这是这个功能唯一真正的技术难点，别的都好说。
+     * 背景色给的是「选什么颜色」，具体字色每次按亮度现算（core/appearance.mjs），
+     * 所以深色背景不会出现白字白底。
+     */
+    el('div', { class: 'vs-h2', text: '外观' }),
+    el('div', { class: 'vs-field' }, [
+      el('label', {}, ['字号', el('span', { class: 'note', text: '只放大文字、不放大版面 —— 侧栏窄也不会被挤出屏幕' })]),
+      select(
+        AP.FONT_SCALES.map(([k, label]) => [k, label]),
+        ap.font,
+        (v) => app.updateSettings({ appearance: { ...ap, font: v } }),
+        'vs-font',
+      ),
+    ]),
+    el('div', { class: 'vs-field' }, [
+      el('label', {}, ['背景色', el('span', { class: 'note', text: '深色底会把字自动变浅；自定义颜色也保证看得清（对比度 ≥ 4.5:1）' })]),
+      el(
+        'div',
+        { class: 'vs-swatches' },
+        [
+          ...AP.PAPER_PRESETS.map(([key, label, color]) =>
+            el('button', {
+              class: `vs-swatch${color ? '' : ' auto'}`,
+              type: 'button',
+              title: label,
+              'aria-label': label,
+              'aria-pressed': (color ? color === ap.paper : ap.paper === 'auto') ? 'true' : 'false',
+              style: color ? { background: color } : null,
+              text: color ? '' : '跟随主题',
+              onclick: () => app.updateSettings({ appearance: { ...ap, paper: color || 'auto' } }),
+            }),
+          ),
+          el('input', {
+            class: 'vs-colorpick',
+            type: 'color',
+            title: '自定义背景色',
+            'aria-label': '自定义背景色',
+            value: ap.paper === 'auto' ? '#FBF7F0' : ap.paper,
+            onchange: (ev) => app.updateSettings({ appearance: { ...ap, paper: ev.target.value } }),
+          }),
+        ],
+      ),
     ]),
 
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
@@ -563,7 +618,7 @@ function togglePrompt(root, app, key) {
   const box = el('div', { id: 'vs-prompt-edit', style: { padding: '8px 0 4px' } }, [
     el('textarea', {
       class: 'vs-input',
-      style: { width: '100%', maxWidth: 'none', height: '140px', textAlign: 'left', fontFamily: 'inherit', fontSize: '11.5px' },
+      style: { width: '100%', maxWidth: 'none', height: '140px', textAlign: 'left', fontFamily: 'inherit', fontSize: 'calc(11.5px * var(--vs-fs, 1))' },
       value: app.raw.settings.prompts?.[key] || '',
       onchange: (ev) => app.updateSettings({ prompts: { ...app.raw.settings.prompts, [key]: ev.target.value } }),
     }),

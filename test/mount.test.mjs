@@ -555,6 +555,30 @@ if (!extracted) {
     );
     check(host.contains(panel.root), '容器的 contains() 能查到面板根节点');
 
+    // ── [4c] 「跟随主题」在**真产物**里也得跟得上（2026-11-15 用户报的 bug）──
+    // 这条走的是 adapter/dsh/puppet.mjs → ui/panel.mjs 的 hostScheme()，
+    // 也就是用户实际用的那条路（不是 demo 外壳）。
+    // 关键是「DSH 到底把主题写在哪」：写的是 html 的 style.colorScheme 和
+    // body[data-ds-dark-theme]，**不是** html.dataset.theme。链子断在这里时，
+    // 「跟随主题」就是死代码：面板永远深色，主题插件完全跟不上。
+    try {
+      if (!DOC.documentElement.style) DOC.documentElement.style = {};
+      DOC.documentElement.style.colorScheme = 'light';
+      panel.render();
+      check(
+        panel.root.dataset.theme === 'light',
+        '宿主 colorScheme=light → 面板跟着变浅（不再死读 dataset.theme）',
+        `实际 data-theme=${panel.root.dataset.theme}`,
+      );
+
+      DOC.documentElement.style.colorScheme = 'dark';
+      panel.render();
+      check(panel.root.dataset.theme === 'dark', '宿主 colorScheme=dark → 面板深色', `实际 data-theme=${panel.root.dataset.theme}`);
+      DOC.documentElement.style.colorScheme = '';
+    } catch (e) {
+      check(false, '跟宿主主题的链路能跑通', e && e.message);
+    }
+
     try {
       panel.destroy();
     } catch {

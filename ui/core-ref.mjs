@@ -23,6 +23,7 @@ let CORE = {
   beckon: {},
   speech: {},
   hook: {},
+  appearance: {},
 };
 
 /**
@@ -44,6 +45,7 @@ export function setCore(input) {
     beckon: pick('beckon', 'B') || CORE.beckon,
     speech: pick('speech', 'SP') || CORE.speech,
     hook: pick('hook', 'HK') || CORE.hook,
+    appearance: pick('appearance', 'AP') || CORE.appearance,
   };
   return CORE;
 }
@@ -51,7 +53,7 @@ export function setCore(input) {
 /**
  * 读命名空间。每个界面函数调用时读，不缓存成模块级常量（避免早读成空对象）。
  *
- * 键名**只有全名**（memory / mistake / game / queue / library / beckon / speech / hook）。
+ * 键名**只有全名**（memory / mistake / game / queue / library / beckon / speech / hook / appearance）。
  * 单字母键（M / Q / …）只在 setCore 的**入参**里被兼容 —— 那是构建产物与
  * ESM 两边的写法差异。读的时候必须写全名：
  *

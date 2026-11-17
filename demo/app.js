@@ -1,7 +1,7 @@
 /*
  * vocab-study · 自包含构建产物 —— 请勿直接编辑
  * 源码在 core/ 与 ui/，改动后重跑：python tools/build.py
- * 构建时间：2026-11-16T09:56:59Z
+ * 构建时间：2026-11-17T06:38:42Z
  */
 'use strict';
 
@@ -82490,6 +82490,299 @@ function restore(snap, { words, mem, confusions, quizPool, now = Date.now() } = 
 }
 
 
+// ═══════════ core/appearance.mjs → AP ═══════════
+// vocab-study / core / appearance.mjs
+//
+// 「外观」设置（2026-11-15 用户反馈新增：「他想自定义背景色和字体大小」）。
+//
+// 设计上的三条硬约束：
+//   1. **不放大版面**。面板钉在右侧栏里只有 340–415px 宽，如果把字号靠整体缩放
+//      来做，字一大就被侧栏横向切掉。所以只有 font-size 走倍率，
+//      内外边距不动 —— 字号变大时占用的是「本来空着的行内空间」，不是版面宽度。
+//   2. **不允许调成看不见**。背景色是用户随便填的，文字颜色必须跟着自动翻深/翻浅，
+//      并且按 WCAG 相对亮度算对比度；实在调不到 4.5:1 的（比如 50% 灰）就往
+//      纯黑/纯白那一档顶，宁可难看也不让字消失。
+//   3. **这个模块不碰 DOM**。纯函数，能在 node 里直接测（对比度、倍率、颜色合法性
+//      都写成了断言，见 test/core.test.mjs 的「外观」一节）。
+//      真正把 var 写到面板根节点上的是 ui/panel.mjs 的 applyAppearance()。
+
+/** 字号档位：label 给人看，scale 给 CSS 用（font-size: calc(Npx * scale)）。 */
+const FONT_SCALES = [
+  ['sm', '小', 0.9],
+  ['md', '标准', 1],
+  ['lg', '大', 1.15],
+  ['xl', '特大', 1.3],
+];
+const FONT_MIN = 0.85;
+const FONT_MAX = 1.4;
+
+/**
+ * 背景预设。`paper` 为 null 表示「跟随主题」（不覆盖任何颜色，交给 data-theme）。
+ * 这些都是实测过对比度的搭配（见 test 里的 ≥ 4.5:1 断言）。
+ */
+const PAPER_PRESETS = [
+  ['auto', '跟随主题', null],
+  ['paper', '米白', '#FBF7F0'],
+  ['gray', '浅灰', '#F2F2EF'],
+  ['green', '护眼绿', '#E8F0E3'],
+  ['warm', '暖黄', '#FBF0D9'],
+  ['night', '深夜', '#1C1A18'],
+];
+
+/** 两套配色（和 styles.css 里的 light / dark 两档保持一致，别各写一份）。 */
+const INK_LIGHT = {
+  ink: '#2E2A26',
+  inkSoft: '#6B6259',
+  inkFaint: '#9A9089',
+  coralText: '#C24432',
+  jadeText: '#157F73',
+  warmText: '#8A6420',
+  awayText: '#5A6774',
+  scheme: 'light',
+  shadow: '0 10px 30px rgba(60, 48, 34, .13), 0 2px 6px rgba(60, 48, 34, .07)',
+};
+
+const INK_DARK = {
+  ink: '#EDE6DB',
+  inkSoft: '#B3A99C',
+  inkFaint: '#7E756A',
+  coralText: '#FF8E80',
+  jadeText: '#5ED0BE',
+  warmText: '#E8BE6A',
+  awayText: '#A5B2BE',
+  scheme: 'dark',
+  shadow: '0 14px 36px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .35)',
+};
+
+/** 极端档：自定义色卡在中间灰的时候，用纯黑/纯白把对比度顶上去。 */
+const INK_EXTREME_DARK = { ...INK_LIGHT, ink: '#141210', inkSoft: '#3A3531', inkFaint: '#5C554E' };
+const INK_EXTREME_LIGHT = { ...INK_DARK, ink: '#FFFFFF', inkSoft: '#D8D2C8', inkFaint: '#B3ACA2' };
+
+const HEX6 = /^#?([0-9a-f]{6})$/i;
+const HEX3 = /^#?([0-9a-f]{3})$/i;
+
+/** 把用户输入的颜色收拾成 `#RRGGBB`；不合法返回 null（调用方回落到「跟随主题」）。 */
+function normalizeHex(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  const m6 = s.match(HEX6);
+  if (m6) return `#${m6[1].toUpperCase()}`;
+  const m3 = s.match(HEX3);
+  if (m3) {
+    const [r, g, b] = m3[1].toUpperCase().split('');
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return null;
+}
+
+/** `#RRGGBB` → [r, g, b]（0–255）。 */
+function rgbOf(hex) {
+  const h = normalizeHex(hex);
+  if (!h) return null;
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+
+/** WCAG 相对亮度（0 = 黑，1 = 白）。 */
+function relativeLuminance(hex) {
+  const rgb = rgbOf(hex);
+  if (!rgb) return 0;
+  const [r, g, b] = rgb.map((c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 两色对比度（WCAG），1–21。 */
+function contrastRatio(hexA, hexB) {
+  const a = relativeLuminance(hexA);
+  const b = relativeLuminance(hexB);
+  const hi = Math.max(a, b);
+  const lo = Math.min(a, b);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** 把 ink 混进纸色一点点，做出「第二层纸」（卡片底）—— 和主题里 paper/paper-2 的关系一致。 */
+function mix(hexA, hexB, t) {
+  const a = rgbOf(hexA);
+  const b = rgbOf(hexB);
+  if (!a || !b) return hexA;
+  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+}
+
+function inkSetToVars(set, paper) {
+  const rgb = rgbOf(set.ink) || [46, 42, 38];
+  const [r, g, b] = rgb;
+  return {
+    '--vs-paper': paper,
+    // 卡片/输入框的底色：纸色里掺 5%（浅色纸）或 6%（深色纸）的墨，肉眼刚好能分层
+    '--vs-paper-2': mix(paper, set.ink, set.scheme === 'light' ? 0.05 : 0.08),
+    '--vs-ink': set.ink,
+    '--vs-ink-soft': set.inkSoft,
+    '--vs-ink-faint': set.inkFaint,
+    '--vs-line': `rgba(${r}, ${g}, ${b}, .10)`,
+    '--vs-line-soft': `rgba(${r}, ${g}, ${b}, .06)`,
+    '--vs-hover': `rgba(${r}, ${g}, ${b}, .05)`,
+    '--vs-chip': `rgba(${r}, ${g}, ${b}, .055)`,
+    '--vs-shadow': set.shadow,
+    '--vs-coral-text': set.coralText,
+    '--vs-jade-text': set.jadeText,
+    '--vs-warm-text': set.warmText,
+    '--vs-away-text': set.awayText,
+    'color-scheme': set.scheme,
+  };
+}
+
+/**
+ * 给任意背景色配一套能看的字色。
+ *
+ * 顺序：先在两套标准配色里挑对比度高的，不够 4.5:1 再往纯黑/纯白顶。
+ * 返回的 key 直接就是 CSS 自定义属性名，写盘/快照里都只存「用户选了什么」，
+ * 具体颜色每次算 —— 这样以后改配色不用迁移数据。
+ */
+function paletteFor(paperHex) {
+  const paper = normalizeHex(paperHex) || '#FBF7F0';
+  const candidates = [INK_LIGHT, INK_DARK, INK_EXTREME_DARK, INK_EXTREME_LIGHT];
+  let best = candidates[0];
+  let bestRatio = 0;
+  for (const set of candidates) {
+    const ratio = contrastRatio(set.ink, paper);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      best = set;
+    }
+  }
+  return { vars: inkSetToVars(best, paper), contrast: bestRatio, scheme: best.scheme };
+}
+
+/** 字号倍率（非法值回落到 1 = 标准）。 */
+function fontScaleOf(key) {
+  const hit = FONT_SCALES.find(([k]) => k === key);
+  if (!hit) return 1;
+  const s = hit[2];
+  return Math.min(FONT_MAX, Math.max(FONT_MIN, s));
+}
+
+/** 外观设置的归一化：存盘/快照前都过这一道，坏数据不许进 state。 */
+function normalizeAppearance(a = {}) {
+  const ap = a && typeof a === 'object' ? a : {};
+  const font = FONT_SCALES.some(([k]) => k === ap.font) ? ap.font : 'md';
+  const hex = normalizeHex(ap.paper);
+  return {
+    font,
+    // 'auto' = 跟随主题；其余一律是 `#RRGGBB`
+    paper: hex || 'auto',
+  };
+}
+
+/** 把外观算成一组 CSS 自定义属性（panel 直接逐个 setProperty，别字符串拼 style）。 */
+function cssVarsFor(appearance) {
+  const ap = normalizeAppearance(appearance);
+  const vars = { '--vs-fs': String(fontScaleOf(ap.font)) };
+  if (ap.paper !== 'auto') {
+    const pal = paletteFor(ap.paper);
+    Object.assign(vars, pal.vars);
+  }
+  return vars;
+}
+
+/** 用户自定义了背景色时，需要被覆盖的那批属性名（切回「跟随主题」时要逐个清掉）。 */
+const APPEARANCE_PROPS = Object.keys(inkSetToVars(INK_LIGHT, '#FFFFFF'));
+
+/** 这个外观会不会改颜色（`auto` 时只改字号）。 */
+function hasCustomPaper(appearance) {
+  return normalizeAppearance(appearance).paper !== 'auto';
+}
+
+// ── 跟随主题：从宿主（DSH）真实渲染出来的值里取 ─────────────────────────
+//
+// 2026-11-15 实测翻车：原来的「跟随主题」是读 `document.documentElement.dataset.theme`，
+// 而 DSH 的主题运行时根本不写这个属性 —— 它做的是：
+//     document.documentElement.style.colorScheme = scheme   // 'light' | 'dark'
+//     document.body.setAttribute('data-ds-dark-theme', '')   // 深色时才有
+//     把 --dsw-* token 变量铺到文档上
+// 于是 `dataset.theme` 永远是 undefined → 回落 'dark' → 面板永远是深色：
+// 用户挑完白底再点「跟随主题」就变回黑，主题插件更是完全跟不上。
+
+/**
+ * CSS 里读回来的颜色字符串 → `#RRGGBB`。
+ *
+ * `getComputedStyle().backgroundColor` 给的是 `rgb(33, 30, 27)` / `rgba(0,0,0,0)`，
+ * 不是 hex，所以不能直接喂给 normalizeHex。半透明（alpha < 0.6）返回 null ——
+ * 下面还压着别的层，拿它当纸色会算错对比度。
+ */
+function cssColorToHex(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  const direct = normalizeHex(s);
+  if (direct) return direct;
+  const m = s.toLowerCase().match(/^rgba?\(([^)]+)\)$/);
+  if (!m) return null;
+  const parts = m[1].split(/[\s,/]+/).filter(Boolean);
+  if (parts.length < 3) return null;
+  const num = (p) => (p.endsWith('%') ? (parseFloat(p) * 255) / 100 : parseFloat(p));
+  const rgb = parts.slice(0, 3).map(num);
+  const alpha = parts.length > 3 ? (parts[3].endsWith('%') ? parseFloat(parts[3]) / 100 : parseFloat(parts[3])) : 1;
+  if (rgb.some((v) => !Number.isFinite(v)) || !Number.isFinite(alpha)) return null;
+  if (alpha < 0.6) return null;
+  return `#${rgb
+    .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()}`;
+}
+
+/**
+ * 宿主现在是深色还是浅色。信号从强到弱：
+ *   1. `data-ds-dark-theme` 属性（DSH 自己打的标，最可靠）
+ *   2. 计算出来的 `color-scheme`（'dark' / 'light' / 'light dark' 之类）
+ *   3. `data-theme` 属性（0.3.5 及以前的探测方式，演示页也用它）
+ *   4. 系统偏好 `prefers-color-scheme`（宿主设成 system 时就是它在决定）
+ *   5. 都不给就按底色亮度反推（主题插件换了深/浅底也认得出）
+ */
+function schemeFromSignals(signals = {}) {
+  const s = signals && typeof signals === 'object' ? signals : {};
+  if (s.darkMarker === true) return 'dark';
+  const cs = typeof s.colorScheme === 'string' ? s.colorScheme.toLowerCase() : '';
+  // color-scheme 可能是「light dark」这种组合值，取**先出现**的那个（CSS 规定第一个是首选）
+  const first = cs.split(/\s+/).find((t) => t === 'dark' || t === 'light');
+  if (first) return first;
+  const dt = typeof s.datasetTheme === 'string' ? s.datasetTheme.toLowerCase() : '';
+  if (dt === 'dark' || dt === 'light') return dt;
+  if (s.prefersDark === true) return 'dark';
+  if (s.prefersDark === false) return 'light';
+  const paper = normalizeHex(s.paper);
+  if (paper) {
+    // 「这个底色离白近还是离黑近」—— 比拍一个亮度阈值稳
+    return contrastRatio(paper, '#FFFFFF') > contrastRatio(paper, '#000000') ? 'dark' : 'light';
+  }
+  return 'dark';
+}
+
+/**
+ * 结合宿主真实底色算 CSS 变量。
+ *
+ * `跟随主题`（paper = 'auto'）时把宿主**画布底色**接过来当纸色 —— 主题插件把
+ * 底色换成淡蓝/米黄，面板也跟着变色，而不是只认「深/浅」两档。
+ *
+ * 但不是直接照抄画布色：面板要像「压在画布上的一张纸」，所以往白里提 5%
+ * （深色画布提亮、浅色画布更白，和 0.3.5 之前 #211E1B / #FBF7F0 的手调关系一致）。
+ * 提亮之后字色照样由 paletteFor 现算，对比度仍然 ≥ 4.5:1。
+ *
+ * 拿不到宿主底色（透明、读不到）时退回 cssVarsFor：只写字号，
+ * 颜色交给 `.vs[data-theme]` 那套静态配色。
+ */
+function cssVarsForHost(appearance, hostCanvasHex) {
+  const ap = normalizeAppearance(appearance);
+  const base = cssVarsFor(ap);
+  if (ap.paper !== 'auto') return base;
+  const canvas = normalizeHex(hostCanvasHex);
+  if (!canvas) return base;
+  const paper = mix(canvas, '#FFFFFF', 0.05);
+  return { ...base, ...paletteFor(paper).vars };
+}
+
+
 // ═══════════ core/app.mjs → A ═══════════
 // vocab-study / core / app.mjs
 // 组合根：把记忆 / 队列 / 会话 / 记录 / 游戏 拼成一个能被 UI 直接驱动的门面。
@@ -82500,6 +82793,7 @@ function restore(snap, { words, mem, confusions, quizPool, now = Date.now() } = 
 //   ports.fetcher  词库拉取（可注入；离线给 null）
 //   ports.ai       AI 增强（可注入；不注入就只有词库自带内容）
 //   ports.context  「我上一级输入」的语境（只在用户点了 ✨ 时才读，隐私最小化 —— §9.1）
+
 
 
 
@@ -82854,6 +83148,14 @@ function createApp(ports = {}) {
       eyeCandy: {
         showInSidebar: s.eyeCandy?.showInSidebar === true,
       },
+      /*
+       * 外观（2026-11-15，用户反馈「想自定义背景色和字体大小」）。
+       *
+       * 存的只有「用户选了什么」：font = sm/md/lg/xl，paper = 'auto' 或 '#RRGGBB'。
+       * 具体颜色不在盘上存 —— 每次由 AP.cssVarsFor() 按背景亮度现算，
+       * 这样以后换配色方案不用迁移用户数据。
+       */
+      appearance: AP.normalizeAppearance(s.appearance),
       schemaVersion: 1,
     };
   }
@@ -84110,9 +84412,10 @@ const Q = { DAY_START_HOUR, dayKey, dayStartTs, daysBetweenKeys, priorDayKey, co
 const G = { COMBO_STEPS, comboMult, COMBO_FREEZE_MS, newCombo, stepCombo, freezeCombo, resumeCombo, LEVELS, levelFor, expFor, conqueredCount };
 const B = { BECKON, TONE, LONG_GONE_DAYS, SOLID_DAYS, beckonState, comebackLine, shouldRipple };
 const S = { RETRY_GAP_MIN, RETRY_GAP_MAX, MODE, RATING, MAX_CONSECUTIVE_NEW, UNDO_WINDOW_MS, QUIZ_ERROR_THRESHOLD, createSession, currentCard, isFinished, coveredCount, submitRating, revealFor, planRetry, insertRetry, advance, ensureNewWordCap, undoLast, buildQuiz, submitQuiz, humanizeConfusion, reportFakeMastery, pauseSession, resumeSession, snapshot, restore };
+const AP = { FONT_SCALES, FONT_MIN, FONT_MAX, PAPER_PRESETS, APPEARANCE_PROPS, normalizeHex, rgbOf, relativeLuminance, contrastRatio, paletteFor, fontScaleOf, normalizeAppearance, cssVarsFor, hasCustomPaper, cssColorToHex, schemeFromSignals, cssVarsForHost };
 const A = { createApp };
 
-const VOCAB_CORE = { M, MK, SEED, C4X, SEEDX, RTD, EXD, EXWD, ETD, WND, CLD, RT, L, SP, HK, Q, G, B, S, A };
+const VOCAB_CORE = { M, MK, SEED, C4X, SEEDX, RTD, EXD, EXWD, ETD, WND, CLD, RT, L, SP, HK, Q, G, B, S, AP, A };
 
 // ═══════════════════════════════════════════════════════════
 // core 自检 —— 规格 §14.6 P0 的机器可读版本
@@ -84415,6 +84718,7 @@ let CORE = {
   beckon: {},
   speech: {},
   hook: {},
+  appearance: {},
 };
 
 /**
@@ -84436,6 +84740,7 @@ function setCore(input) {
     beckon: pick('beckon', 'B') || CORE.beckon,
     speech: pick('speech', 'SP') || CORE.speech,
     hook: pick('hook', 'HK') || CORE.hook,
+    appearance: pick('appearance', 'AP') || CORE.appearance,
   };
   return CORE;
 }
@@ -84443,7 +84748,7 @@ function setCore(input) {
 /**
  * 读命名空间。每个界面函数调用时读，不缓存成模块级常量（避免早读成空对象）。
  *
- * 键名**只有全名**（memory / mistake / game / queue / library / beckon / speech / hook）。
+ * 键名**只有全名**（memory / mistake / game / queue / library / beckon / speech / hook / appearance）。
  * 单字母键（M / Q / …）只在 setCore 的**入参**里被兼容 —— 那是构建产物与
  * ESM 两边的写法差异。读的时候必须写全名：
  *
@@ -84572,6 +84877,7 @@ const setCore = VOCAB_CORE.UI_CORE_REF.setCore;
 
 
 // 摊平用的替换是「单行 import」正则，所以这里必须一行一个，别折行。
+
 
 
 
@@ -84848,10 +85154,13 @@ function renderVocab(root, st, app) {
   );
 }
 function renderSettings(root, st, app) {
-  const { library: L, queue: Q } = getCore();
+  const { library: L, queue: Q, appearance: AP } = getCore();
   clear(root);
   const s = st.settings;
   const bal = s.balance;
+  // 外观（字号档位 + 背景色）。老数据里没有这个字段时按默认值渲染，
+  // 不写回盘 —— 保存留给用户真正动了控件那一刻。
+  const ap = s.appearance || { font: 'md', paper: 'auto' };
   const preview = previewBalance(st, app, bal);
 
   const setNum = (key) => (ev) => app.updateSettings({ [key]: Number(ev.target.value) });
@@ -84970,6 +85279,57 @@ function renderSettings(root, st, app) {
         checked: s.eyeCandy?.showInSidebar ? true : null,
         onchange: (ev) => app.updateSettings({ eyeCandy: { ...s.eyeCandy, showInSidebar: !!ev.target.checked } }),
       }),
+    ]),
+
+    /*
+     * 外观（2026-11-15 用户反馈：「他想自定义背景色和字体大小」）。
+     *
+     * 两个控件都**即时生效**：改完调 updateSettings → emit → 面板重渲染，
+     * 不需要保存按钮，也不会动正在背的这一轮（appearance 不在重建白名单里）。
+     *
+     * 字号只放文字不放版面：侧栏最窄 340px，整体缩放会把版面横着切掉 ——
+     * 这是这个功能唯一真正的技术难点，别的都好说。
+     * 背景色给的是「选什么颜色」，具体字色每次按亮度现算（core/appearance.mjs），
+     * 所以深色背景不会出现白字白底。
+     */
+    el('div', { class: 'vs-h2', text: '外观' }),
+    el('div', { class: 'vs-field' }, [
+      el('label', {}, ['字号', el('span', { class: 'note', text: '只放大文字、不放大版面 —— 侧栏窄也不会被挤出屏幕' })]),
+      select(
+        AP.FONT_SCALES.map(([k, label]) => [k, label]),
+        ap.font,
+        (v) => app.updateSettings({ appearance: { ...ap, font: v } }),
+        'vs-font',
+      ),
+    ]),
+    el('div', { class: 'vs-field' }, [
+      el('label', {}, ['背景色', el('span', { class: 'note', text: '深色底会把字自动变浅；自定义颜色也保证看得清（对比度 ≥ 4.5:1）' })]),
+      el(
+        'div',
+        { class: 'vs-swatches' },
+        [
+          ...AP.PAPER_PRESETS.map(([key, label, color]) =>
+            el('button', {
+              class: `vs-swatch${color ? '' : ' auto'}`,
+              type: 'button',
+              title: label,
+              'aria-label': label,
+              'aria-pressed': (color ? color === ap.paper : ap.paper === 'auto') ? 'true' : 'false',
+              style: color ? { background: color } : null,
+              text: color ? '' : '跟随主题',
+              onclick: () => app.updateSettings({ appearance: { ...ap, paper: color || 'auto' } }),
+            }),
+          ),
+          el('input', {
+            class: 'vs-colorpick',
+            type: 'color',
+            title: '自定义背景色',
+            'aria-label': '自定义背景色',
+            value: ap.paper === 'auto' ? '#FBF7F0' : ap.paper,
+            onchange: (ev) => app.updateSettings({ appearance: { ...ap, paper: ev.target.value } }),
+          }),
+        ],
+      ),
     ]),
 
     el('div', { class: 'vs-h2', text: 'AI 增强' }),
@@ -85126,7 +85486,7 @@ function togglePrompt(root, app, key) {
   const box = el('div', { id: 'vs-prompt-edit', style: { padding: '8px 0 4px' } }, [
     el('textarea', {
       class: 'vs-input',
-      style: { width: '100%', maxWidth: 'none', height: '140px', textAlign: 'left', fontFamily: 'inherit', fontSize: '11.5px' },
+      style: { width: '100%', maxWidth: 'none', height: '140px', textAlign: 'left', fontFamily: 'inherit', fontSize: 'calc(11.5px * var(--vs-fs, 1))' },
       value: app.raw.settings.prompts?.[key] || '',
       onchange: (ev) => app.updateSettings({ prompts: { ...app.raw.settings.prompts, [key]: ev.target.value } }),
     }),
@@ -85270,6 +85630,7 @@ const clear = VOCAB_CORE.UI_DOM.clear;
 const setText = VOCAB_CORE.UI_DOM.setText;
 const focusSelf = VOCAB_CORE.UI_DOM.focusSelf;
 const prefersReducedMotion = VOCAB_CORE.UI_DOM.prefersReducedMotion;
+const getCore = VOCAB_CORE.UI_CORE_REF.getCore;
 const renderProgress = VOCAB_CORE.UI_PAGES.renderProgress;
 const renderVocab = VOCAB_CORE.UI_PAGES.renderVocab;
 const renderSettings = VOCAB_CORE.UI_PAGES.renderSettings;
@@ -85289,6 +85650,170 @@ const createEyeCandy = VOCAB_CORE.UI_EYE_CANDY.createEyeCandy;
 // 并写入 DP 模型 —— 静默污染学习记录。
 
 
+
+
+/**
+ * 把「外观」设置写成面板根节点上的 CSS 变量（字号倍率 + 自定义纸色）。
+ *
+ * 为什么必须逐个 removeProperty：用户把背景色调成自定义色以后，那些变量是
+ * **内联样式**，优先级高于 `.vs[data-theme]` 里的声明。切回「跟随主题」时
+ * 若只改 data-theme 而不清内联值，颜色会永远停在用户上次选的那一档。
+ *
+ * 「跟随主题」不是「什么都不写」：那样只会用面板自带的深/浅两套固定配色，
+ * 宿主换了个底色（主题插件）就跟不上了。现在把宿主真实底色读出来当纸色。
+ */
+function applyAppearance(root, appearance) {
+  const AP = getCore().appearance;
+  if (!AP || typeof AP.cssVarsFor !== 'function') return;
+  const vars = typeof AP.cssVarsForHost === 'function'
+    ? AP.cssVarsForHost(appearance, readHostPaper())
+    : AP.cssVarsFor(appearance);
+  for (const p of ['--vs-fs', 'color-scheme', ...AP.APPEARANCE_PROPS]) {
+    const v = Object.prototype.hasOwnProperty.call(vars, p) ? vars[p] : null;
+    setStyleVar(root, p, v);
+  }
+}
+
+/**
+ * 读宿主**真实渲染出来**的底色（rgb/rgba → #RRGGBB）。
+ *
+ * 先看 body，再看 html：DSH 把配色写在 documentElement 的 --dsw-* 上，
+ * body 背景通常是实色；拿不到就返回 null，让调用方退回静态配色。
+ * 全程 try/catch：demo-boot 那套假 DOM 没有 getComputedStyle。
+ */
+function readHostPaper() {
+  const AP = getCore().appearance;
+  if (!AP || typeof AP.cssColorToHex !== 'function') return null;
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return null;
+  const nodes = [document.body, document.documentElement];
+  for (const node of nodes) {
+    if (!node) continue;
+    try {
+      const hex = AP.cssColorToHex(getComputedStyle(node).backgroundColor);
+      if (hex) return hex;
+    } catch {
+      /* 读不到就看下一个 */
+    }
+  }
+  return null;
+}
+
+/**
+ * 宿主现在是深色还是浅色。
+ *
+ * 为什么不能读 `documentElement.dataset.theme`：DSH 的主题运行时压根不写这个
+ * 属性（它写 `style.colorScheme` + `body[data-ds-dark-theme]`），于是那个判断
+ * 永远返回 undefined → 面板永远深色，「跟随主题」形同虚设。
+ * 判定逻辑本身在 core/appearance.mjs 的 schemeFromSignals()，这里只负责采信号。
+ */
+function hostScheme() {
+  const AP = getCore().appearance;
+  if (!AP || typeof AP.schemeFromSignals !== 'function') return 'dark';
+  const signals = { darkMarker: false, colorScheme: '', datasetTheme: '', prefersDark: undefined, paper: null };
+  try {
+    if (typeof document !== 'undefined') {
+      const body = document.body;
+      const html = document.documentElement;
+      if (body && typeof body.hasAttribute === 'function') {
+        signals.darkMarker = body.hasAttribute('data-ds-dark-theme');
+      }
+      if (html) {
+        signals.colorScheme = (html.style && html.style.colorScheme) || '';
+        if (!signals.colorScheme && typeof getComputedStyle === 'function') {
+          try {
+            signals.colorScheme = getComputedStyle(html).colorScheme || '';
+          } catch {
+            /* 假 DOM */
+          }
+        }
+        // 老路径兜底：0.3.5 之前（以及演示页）是靠 data-theme 标深浅的
+        signals.datasetTheme = (html.dataset && html.dataset.theme) || (typeof html.getAttribute === 'function' ? html.getAttribute('data-theme') || '' : '');
+      }
+    }
+    if (typeof matchMedia === 'function') {
+      signals.prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+  } catch {
+    /* 任何一环读不到就靠后面的兜底 */
+  }
+  signals.paper = readHostPaper();
+  return AP.schemeFromSignals(signals);
+}
+
+/**
+ * 写一个 CSS 自定义属性（value=null 表示删掉）。
+ *
+ * 为什么要包一层：demo-boot 那套测试用的是手写的假 DOM，它的 style 只是个
+ * 普通对象、没有 setProperty —— 直接调会在「切到设置页」时抛错，把整条
+ * 启动链路带崩（测试报 TypeError: root.style.setProperty is not a function）。
+ * 真宿主里走标准 API，假 DOM 里退化成赋值，两边都不炸。
+ */
+function setStyleVar(node, prop, value) {
+  // ⚠️ 局部变量别叫 st：core.test.mjs 会扫 ui/*.mjs 里「st 后面跟属性」的写法，
+  // 把它当成「视图读了快照里不存在的字段」（实测报了 removeProperty / setProperty）。
+  // 这里也刻意不把这个写法原样写进注释 —— 注释同样在扫描范围内。
+  const style = node && node.style;
+  if (!style) return;
+  if (typeof style.setProperty === 'function') {
+    if (value === null) style.removeProperty(prop);
+    else style.setProperty(prop, value);
+    return;
+  }
+  if (value === null) delete style[prop];
+  else style[prop] = value;
+}
+
+/**
+ * 盯着宿主的主题变化，一变就把面板同步过去。返回一个「停止监听」的函数。
+ *
+ * 三种信号都要听，因为 DSH 换主题有三条路：
+ *   1. 设置页切「浅色/深色/跟随系统」→ theme-runtime 改 documentElement 的
+ *      style.colorScheme 并重铺 --dsw-* token（= html 的 style 属性变动）
+ *   2. 深色时 body 上会有 data-ds-dark-theme（= body 的属性变动）
+ *   3. 系统配色变了（宿主偏好是 system）→ matchMedia 的 change
+ * 没有这一段，用户切主题后面板会一直停在旧主题的颜色上，得关掉重开才更新。
+ *
+ * 只监听自身属性、不监听子树（subtree: false），所以面板自己写内联样式
+ * 不会反喂回来形成死循环。
+ *
+ * 放在 panel.mjs 而不是 demo 外壳里：**真插件（adapter/dsh/puppet.mjs）走的
+ * 是这条路径**，demo 外壳只是复用它。第一版只在 shell.mjs 里装了监听，
+ * 结果真宿主里切主题照样不更新。
+ */
+function watchHostTheme(getPanel) {
+  const sync = () => {
+    const p = getPanel && getPanel();
+    if (p && typeof p.setTheme === 'function') p.setTheme(hostScheme());
+  };
+  const stops = [];
+  try {
+    const mo = new MutationObserver(sync);
+    const opts = { attributes: true, attributeFilter: ['style', 'class', 'data-ds-dark-theme', 'data-theme'] };
+    if (document.body) mo.observe(document.body, opts);
+    if (document.documentElement) mo.observe(document.documentElement, opts);
+    stops.push(() => mo.disconnect());
+  } catch {
+    /* 没有 MutationObserver（测试假 DOM）就靠下次 render 时现算 */
+  }
+  try {
+    const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    if (mq && typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', sync);
+      stops.push(() => mq.removeEventListener('change', sync));
+    }
+  } catch {
+    /* 同上 */
+  }
+  return () => {
+    for (const stop of stops) {
+      try {
+        stop();
+      } catch {
+        /* 忽略 */
+      }
+    }
+  };
+}
 
 const TABS = [
   ['today', '今日'],
@@ -85421,7 +85946,13 @@ function createPanel(app, ctx = {}) {
     if (typeof injectVocabStudyCss === 'function') injectVocabStudyCss(undefined, root);
     const st = app.state;
     root.className = `vs vs-panel ${isDocked() ? 'docked' : 'floating'}`;
-    root.dataset.theme = ctx.theme || 'dark';
+    // 深浅跟着宿主实时走（getScheme 由 shell 提供，内部就是 hostScheme()）。
+    // 没有 getScheme 时退回创建时传进来的 ctx.theme（demo 老路径/测试假 DOM）。
+    ctx.theme = ctx.getScheme ? ctx.getScheme() : ctx.theme || 'dark';
+    root.dataset.theme = ctx.theme;
+    // 外观（字号/背景）跟着设置走：每次渲染都写一遍，改设置即时生效，
+    // 也不需要额外的 emit 通道 —— updateSettings 本来就会 emit。
+    applyAppearance(root, st.settings?.appearance);
 
     // 顶栏
     mount(
@@ -86168,11 +86699,14 @@ function createPanel(app, ctx = {}) {
     setTheme(t) {
       ctx.theme = t;
       root.dataset.theme = t;
+      // 宿主换主题时必须重算一次外观：选「跟随主题」时纸色是从宿主底色读出来的，
+      // 只改 data-theme 不重算，颜色会停在旧主题上（这正是用户报的那个 bug 的变体）。
+      applyAppearance(root, app.state.settings?.appearance);
     },
   };
 }
 
-return { createPanel };
+return { createPanel, hostScheme, watchHostTheme };
 })();
 
 // ═══════════ ui/capsule.mjs → UI_CAPSULE ═══════════
@@ -86236,6 +86770,8 @@ return { createCapsule };
 VOCAB_CORE.UI_SHELL = (() => {
 const createApp = VOCAB_CORE.A.createApp;
 const createPanel = VOCAB_CORE.UI_PANEL.createPanel;
+const hostScheme = VOCAB_CORE.UI_PANEL.hostScheme;
+const watchHostTheme = VOCAB_CORE.UI_PANEL.watchHostTheme;
 const createCapsule = VOCAB_CORE.UI_CAPSULE.createCapsule;
 const speak = VOCAB_CORE.SP.speak;
 // vocab-study / ui / shell.mjs
@@ -86247,6 +86783,11 @@ const speak = VOCAB_CORE.SP.speak;
 
 
 
+
+/**
+ * 盯宿主主题的活函数住在 ui/panel.mjs（`watchHostTheme`）—— 真插件和 demo 共用一份，
+ * 否则就会出现「demo 里切主题跟得上、真宿主里跟不上」这种只在一边好的假象。
+ */
 
 /**
  * 启动 demo。单文件形态下由构建产物末尾调用；ESM 形态下也可直接 import 使用。
@@ -86277,8 +86818,7 @@ async function boot(mountPoint) {
   }
 }
 
-async function bootInner(mp) {
-  // ── 1. 演示用的持久化（真插件里换成 JSONL + 快照，见 store/client-store.mjs）──
+async function bootInner(mp) {  // ── 1. 演示用的持久化（真插件里换成 JSONL + 快照，见 store/client-store.mjs）──
   const storage = demoStorage('vocab-study-demo');
 
   // ── 2. 让 demo「有历史」：第一次打开时补一段过去的记录，好看到连续天数 ──
@@ -86390,7 +86930,11 @@ async function bootInner(mp) {
   function ensurePanel() {
     if (panel) return panel;
     panel = createPanel(app, {
-      theme: document.documentElement.dataset.theme || 'dark',
+      // 注意：这里不能写成 `document.documentElement.dataset.theme || 'dark'`。
+      // DSH 的主题不写那个属性（它写 style.colorScheme + body[data-ds-dark-theme]），
+      // 那个表达式永远是 undefined → 面板永远深色，「跟随主题」等于没做（0.3.6 修）。
+      theme: hostScheme(),
+      getScheme: () => hostScheme(),
       getDocked: () => docked,
       isWide,
       onClose: () => closePanel(),
@@ -86526,6 +87070,9 @@ async function bootInner(mp) {
   applyWidth();
   // 刻意不自动打开面板：面板永不自作主张（P1）
   setTimeout(runStreamCycle, 1500);
+
+  // 宿主换主题时面板要跟上（含「跟随系统」时系统切了、或用户装的主题插件热更换色）
+  watchHostTheme(() => panel);
 
   // demo 专用测试口子。
   //

@@ -35,10 +35,10 @@ DSH（DeepSeek Harness）的一个**纯客户端 UI 插件**：在输入框右�
 
 | 项 | 说明 |
 |---|---|
-| 版本 | `0.3.5`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
-| 成熟度 | 功能可用、**在真界面里逐条点过**；13 套件 / 约 600 条断言全绿（详见[测试](#测试)） |
+| 版本 | `0.3.6`（[Releases](https://github.com/wt0812/dsh-vocab-study/releases)） |
+| 成熟度 | 功能可用、**在真界面里逐条点过**；13 套件 / 644 条断言全绿（详见[测试](#测试)） |
 | 依赖 | **零**。没有 `node_modules`，不联网、不上报，数据只在本机浏览器里 |
-| 体积 | `lib/client.js` 5,677,324 B ≈ **5.41 MB**（内含六本词库共 **34,216** 词，见[为什么这么大](#构建)） |
+| 体积 | `lib/client.js` 5,716,627 B ≈ **5.45 MB**（内含六本词库共 **34,216** 词，见[为什么这么大](#构建)） |
 | 装法 | `dsh plugin --profile web add dsh-vocab-study`（npm，推荐）<br>或 `dsh plugin --profile web add github:wt0812/dsh-vocab-study` |
 | 国内镜像 | [gitee.com/wutong2005/dsh-vocab-study](https://gitee.com/wutong2005/dsh-vocab-study)（**与 GitHub 逐提交一致**，见下） |
 | 市场收录 | 已被第三方市场 dshmarket **收录**（[PR #7043](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7043) 于 2026-10-17 合并） |
@@ -65,7 +65,7 @@ python tools/install.py
 > **镜像不是自动同步的**，是我推的。一切以 GitHub 为准。
 
 > 「成熟度」这一行我写得很克制：**能用**是真的（你亲手点过），
-> 但它是 0.3.5、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
+> 但它是 0.3.6、只有一个人在用、只有一台机器验过 —— 不是"生产级"。
 
 ---
 
@@ -103,7 +103,11 @@ python tools/install.py
 | **今日** | 一张词卡 + 三档评分；下方是今天这批的进度环、KPI、半月热力图 | ![今日](assets/screenshot-3-today.png) |
 | **进度** | 30 天留存曲线、半月热力图、顽固词榜、需要对着练的混淆对 | ![进度](assets/screenshot-4-progress.png) |
 | **生词本** | 从对话里收的词，**自动补上音标 + 词性 + 释义**，可以手改 | ![生词本](assets/screenshot-5-vocab.png) |
-| **设置** | 一轮几个词、加量步长、攻守天平、数据导入导出 | ![设置](assets/screenshot-6-settings.png) |
+| **设置** | 一轮几个词、加量步长、攻守天平、**字号四档 + 背景色自定义**、数据导入导出 | ![设置](assets/screenshot-6-settings.png) |
+
+> 「字号四档 + 背景色自定义」是 0.3.6 加的（用户反馈要的）：字号只放大文字不放大版面，
+> 背景色支持任意取色、字色按亮度自动翻深翻浅（对比度保证 ≥ 4.5:1）。
+> 这一项的验收脚本是 `node tools/verify-appearance.mjs`（真 Chrome 里量计算值 + 窄屏 380px 查溢出）。
 
 > 这四张图是 `node tools/make-releasshots.mjs` 出的，脚本自带两道闸门（裁切区里只能有面板和背景、
 > 产出图四角必须是背景色），拍错了会直接报错拒绝出图。

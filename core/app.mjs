@@ -16,6 +16,7 @@ import * as G from './game.mjs';
 import * as MK from './mistake.mjs';
 import * as L from './library.mjs';
 import * as B from './beckon.mjs';
+import * as AP from './appearance.mjs';
 import { buildHook, createHookCache } from './hook.mjs';
 
 // DAY_MS 只在 memory.mjs 声明一处：ESM 形态下经 import 拿到，单文件形态下同处一个作用域。
@@ -367,6 +368,14 @@ export function createApp(ports = {}) {
       eyeCandy: {
         showInSidebar: s.eyeCandy?.showInSidebar === true,
       },
+      /*
+       * 外观（2026-11-15，用户反馈「想自定义背景色和字体大小」）。
+       *
+       * 存的只有「用户选了什么」：font = sm/md/lg/xl，paper = 'auto' 或 '#RRGGBB'。
+       * 具体颜色不在盘上存 —— 每次由 AP.cssVarsFor() 按背景亮度现算，
+       * 这样以后换配色方案不用迁移用户数据。
+       */
+      appearance: AP.normalizeAppearance(s.appearance),
       schemaVersion: 1,
     };
   }

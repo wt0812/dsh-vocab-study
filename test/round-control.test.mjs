@@ -990,6 +990,93 @@ console.log('\n⑫ 答题记录分片（写盘成本不随历史增长）：');
   }
 }
 
+// ── ⑬ 外观设置（字号 / 背景色）：即时生效、落盘、重启还在、坏数据不炸 ──
+//
+// 用户反馈原话：「他想自定义背景色和字体大小」（2026-11-15）。
+// 这一节守的不是"颜色对不对"（那在 core.test 里按 WCAG 对比度抽），
+// 而是**设置这条链路**：拨一下 → 存盘 → 重开还在 → 老数据/坏数据不把界面搞崩。
+console.log('\n⑬ 外观设置（字号 / 背景色）：');
+{
+  const raw = new Map();
+  const fakeLs = {
+    getItem: (k) => (raw.has(k) ? raw.get(k) : null),
+    setItem: (k, v) => { raw.set(k, v); },
+    removeItem: (k) => { raw.delete(k); },
+    key: (i) => [...raw.keys()][i] ?? null,
+    get length() { return raw.size; },
+  };
+  const prevLs = globalThis.localStorage;
+  globalThis.localStorage = fakeLs;
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  try {
+    clock = startOfDay();
+    const st = createStorage({ namespace: 'vs-ap-test', now: () => clock });
+    const app = createApp({ storage: st, now: () => clock });
+    await app.init();
+
+    ok('默认外观 = 标准字号 + 跟随主题（老用户升级后界面不变样）',
+       app.state.settings.appearance.font === 'md' && app.state.settings.appearance.paper === 'auto',
+       JSON.stringify(app.state.settings.appearance));
+
+    // 拨外观不许动正在背的这一轮（改颜色把词换掉了，是最招人烦的那种 bug）
+    const cardBefore = app.state.card ? app.state.card.word : null;
+    app.updateSettings({ appearance: { font: 'xl', paper: '#1C1A18' } });
+    await settle();
+    const cardAfter = app.state.card ? app.state.card.word : null;
+    ok('调字号/背景色不会把正在背的这张卡换掉',
+       cardBefore !== null && cardBefore === cardAfter, `${cardBefore} → ${cardAfter}`);
+    ok('设置立刻写进 state', app.state.settings.appearance.font === 'xl'
+       && app.state.settings.appearance.paper === '#1C1A18',
+       JSON.stringify(app.state.settings.appearance));
+
+    const disk = JSON.parse(raw.get('vs-ap-test:state') || '{}');
+    ok('外观写进盘上的 state（不是只在内存里）',
+       disk.value?.settings?.appearance?.font === 'xl'
+         && disk.value.settings.appearance.paper === '#1C1A18',
+       JSON.stringify(disk.value?.settings?.appearance));
+
+    // 重启：同一份 storage 再起一个 app
+    const st2 = createStorage({ namespace: 'vs-ap-test', now: () => clock });
+    const app2 = createApp({ storage: st2, now: () => clock });
+    await app2.init();
+    ok('重启后字号/背景色都还在', app2.state.settings.appearance.font === 'xl'
+       && app2.state.settings.appearance.paper === '#1C1A18',
+       JSON.stringify(app2.state.settings.appearance));
+
+    // 坏数据：手改盘上的值（老版本 / 用户乱填），不许把面板搞崩
+    const broke = JSON.parse(raw.get('vs-ap-test:state'));
+    broke.value.settings.appearance = { font: 'HUGE', paper: 'chartreuse' };
+    raw.set('vs-ap-test:state', JSON.stringify(broke));
+    const app3 = createApp({ storage: createStorage({ namespace: 'vs-ap-test', now: () => clock }), now: () => clock });
+    let crashed = null;
+    try {
+      await app3.init();
+    } catch (err) {
+      crashed = err.message;
+    }
+    ok('盘上是坏值也能起来（回落到标准字号 + 跟随主题）',
+       !crashed && app3.state.settings.appearance.font === 'md'
+         && app3.state.settings.appearance.paper === 'auto',
+       crashed || JSON.stringify(app3.state.settings.appearance));
+
+    // 完全没这个字段的老数据（0.3.5 及以前）
+    const old = JSON.parse(raw.get('vs-ap-test:state'));
+    delete old.value.settings.appearance;
+    raw.set('vs-ap-test:state', JSON.stringify(old));
+    const app4 = createApp({ storage: createStorage({ namespace: 'vs-ap-test', now: () => clock }), now: () => clock });
+    let crashed2 = null;
+    try {
+      await app4.init();
+    } catch (err) {
+      crashed2 = err.message;
+    }
+    ok('0.3.5 及以前的数据（没有 appearance 字段）也能正常起来',
+       !crashed2 && app4.state.settings.appearance.paper === 'auto', crashed2 || 'ok');
+  } finally {
+    globalThis.localStorage = prevLs;
+  }
+}
+
 console.log('\n────────────────────────────────────────────────────────');
 if (fail === 0) {
   console.log(`${GREEN}${pass} 通过 / 0 失败${OFF}  —— 三个抱怨都有对应断言`);

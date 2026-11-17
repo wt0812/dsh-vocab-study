@@ -16,6 +16,7 @@ import { SEED_CET4_RAW } from '../core/seed-cet4.mjs';
 import * as G from '../core/game.mjs';
 import * as MK from '../core/mistake.mjs';
 import * as HK from '../core/hook.mjs';
+import * as AP from '../core/appearance.mjs';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 const GREEN = '\x1b[32m';
@@ -748,6 +749,223 @@ if (fail === 0) {
 
       console.log(`      ${targets.length} 个词，最多抽签 ${worst} 次（上限 ${LIMIT}）`);
       return true;
+    })(),
+  ]);
+
+  // ── 外观：字号倍率 + 背景色 → 字色自动反色（2026-11-15）────────────
+  // 这一节守的是「用户随便挑个背景色，字不能消失」。
+  // 判据是 WCAG 对比度 ≥ 4.5:1，不是"看着还行"。
+  extras.push([
+    '外观：字号四档 + 任意背景色的字色对比度都 ≥ 4.5:1',
+    (() => {
+      const checks = [];
+      const eq = (name, got, want) => checks.push([`${name}：${JSON.stringify(got)}`, got === want]);
+
+      // (a) 颜色解析：三位/六位/大小写/非法值
+      eq('normalizeHex 六位大写化', AP.normalizeHex('#fbF7f0'), '#FBF7F0');
+      eq('normalizeHex 三位展开', AP.normalizeHex('#fff'), '#FFFFFF');
+      eq('normalizeHex 不吃非法值', AP.normalizeHex('red'), null);
+      eq('normalizeHex 不吃空串', AP.normalizeHex(''), null);
+      eq('normalizeHex 不吃 undefined', AP.normalizeHex(undefined), null);
+
+      // (b) 五个预设背景 + 四个极端自定义色，字色对比度都必须 ≥ 4.5:1
+      const papers = AP.PAPER_PRESETS.filter(([, , c]) => c).map(([, label, c]) => [label, c]);
+      papers.push(['纯白', '#FFFFFF'], ['纯黑', '#000000'], ['中间灰', '#808080'], ['随便一个蓝', '#123456']);
+      const worst = { label: '', ratio: 99 };
+      let allOk = true;
+      for (const [label, hex] of papers) {
+        const pal = AP.paletteFor(hex);
+        const ratio = AP.contrastRatio(pal.vars['--vs-ink'], hex);
+        if (ratio < worst.ratio) {
+          worst.label = label;
+          worst.ratio = ratio;
+        }
+        if (ratio < 4.5) {
+          console.log(`      ↑ 「${label}」(${hex}) 字色 ${pal.vars['--vs-ink']} 对比度只有 ${ratio.toFixed(2)}:1`);
+          allOk = false;
+        }
+      }
+      checks.push([
+        `${papers.length} 种背景色的字色对比度都 ≥ 4.5:1（最差「${worst.label}」${worst.ratio.toFixed(2)}:1）`,
+        allOk,
+      ]);
+
+      // (c) 深浅两极确实反了色（不是永远用同一套字色蒙过去）
+      const onLight = AP.paletteFor('#FBF7F0');
+      const onDark = AP.paletteFor('#1C1A18');
+      checks.push([
+        '浅色底 → 深色字 / 深色底 → 浅色字',
+        AP.relativeLuminance(onLight.vars['--vs-ink']) < 0.2 &&
+          AP.relativeLuminance(onDark.vars['--vs-ink']) > 0.6,
+      ]);
+      checks.push([
+        '深浅两档的 color-scheme 也反了（输入框/滚动条跟着变）',
+        onLight.vars['color-scheme'] === 'light' && onDark.vars['color-scheme'] === 'dark',
+      ]);
+      // 卡片底（paper-2）必须和纸色不同，否则卡片会"糊"在背景上
+      checks.push([
+        'paper-2 和 paper 不是同一个颜色',
+        onLight.vars['--vs-paper-2'] !== onLight.vars['--vs-paper'] &&
+          onDark.vars['--vs-paper-2'] !== onDark.vars['--vs-paper'],
+      ]);
+
+      // (d) 归一化：坏数据不许进 state
+      const bad = AP.normalizeAppearance({ font: 'HUGE', paper: 'chartreuse' });
+      checks.push(['非法字号回落到标准', bad.font === 'md']);
+      checks.push(['非法颜色回落到跟随主题', bad.paper === 'auto']);
+      checks.push([
+        '合法值原样保留（并大写化）',
+        AP.normalizeAppearance({ font: 'xl', paper: '#1c1a18' }).paper === '#1C1A18' &&
+          AP.normalizeAppearance({ font: 'sm' }).font === 'sm',
+      ]);
+      checks.push(['undefined 也能归一化（老数据没有这个字段）', AP.normalizeAppearance().paper === 'auto']);
+
+      // (e) 字号倍率：四档都在允许区间里，未知档位回落到 1
+      const scales = AP.FONT_SCALES.map(([k, label, v]) => ({ k, label, v }));
+      checks.push([
+        `四档倍率单调递增且都在 ${AP.FONT_MIN}–${AP.FONT_MAX}（${scales.map((s) => `${s.label}${s.v}`).join(' / ')}）`,
+        scales.every((s, i) => s.v >= AP.FONT_MIN && s.v <= AP.FONT_MAX && (i === 0 || s.v > scales[i - 1].v)),
+      ]);
+      checks.push(['未知档位 → 1 倍', AP.fontScaleOf('nope') === 1 && AP.fontScaleOf('xl') === 1.3]);
+
+      // (f) cssVarsFor 的两条硬要求：
+      //     跟随主题时**不许**吐出颜色（否则切换主题会失效）；
+      //     选自定义色时必须把整套颜色都吐出来（少一个就会有一处还亮着老主题）。
+      const varsAuto = AP.cssVarsFor({ font: 'lg', paper: 'auto' });
+      checks.push([
+        '跟随主题：只出字号，不出任何颜色',
+        varsAuto['--vs-fs'] === '1.15' && !('--vs-paper' in varsAuto) && !('--vs-ink' in varsAuto),
+      ]);
+      const varsCustom = AP.cssVarsFor({ font: 'md', paper: '#1C1A18' });
+      const missing = AP.APPEARANCE_PROPS.filter((p) => !(p in varsCustom));
+      checks.push([`自定义背景：${AP.APPEARANCE_PROPS.length} 个颜色变量一个不少（缺 ${missing.length}）`, missing.length === 0]);
+      checks.push([
+        '自定义背景时字号仍是 1（两件事互不干扰）',
+        varsCustom['--vs-fs'] === '1' && varsCustom['--vs-paper'] === '#1C1A18',
+      ]);
+
+      // (g) 和设置层接上了：默认值等于「不改外观」，老用户升上来界面不变样
+      const def = AP.normalizeAppearance();
+      checks.push([
+        '默认外观 = 标准字号 + 跟随主题（老用户升级后界面不变）',
+        def.font === 'md' && def.paper === 'auto' && AP.fontScaleOf(def.font) === 1,
+      ]);
+
+      for (const [name, ok] of checks) {
+        if (!ok) console.log(`      ↑ 外观：${name}`);
+      }
+      return checks.every(([, ok]) => ok);
+    })(),
+  ]);
+
+  // ── 「跟随主题」到底跟的是谁（2026-11-15 用户实测报的 bug）──────────
+  // 原来读 documentElement.dataset.theme —— DSH 根本不写那个属性，
+  // 永远是 undefined → 回落 'dark' → 面板永远深色：挑完白底再点「跟随主题」
+  // 就变回黑，主题插件完全跟不上。这一节把「怎么认宿主主题」和
+  // 「跟随主题时拿宿主底色当纸色」都钉住。
+  extras.push([
+    '跟随主题：认得出宿主的深浅 + 跟着宿主底色走（不再永远深色）',
+    (() => {
+      const checks = [];
+
+      // (a) 从 CSS 读回来的颜色串要能解析（getComputedStyle 给的是 rgb()）
+      const cases = [
+        ['rgb(33, 30, 27)', '#211E1B'],
+        ['rgb(247, 244, 238)', '#F7F4EE'],
+        ['rgba(251, 247, 240, 1)', '#FBF7F0'],
+        ['#FBF7F0', '#FBF7F0'],
+        ['rgb(10 20 30)', '#0A141E'],
+      ];
+      const badParse = cases.filter(([input, want]) => AP.cssColorToHex(input) !== want);
+      checks.push([`rgb()/hex 都能转成 #RRGGBB（${cases.length} 种写法，错 ${badParse.length}）`, badParse.length === 0]);
+      checks.push([
+        '透明/半透明/垃圾值不许当纸色',
+        AP.cssColorToHex('rgba(0, 0, 0, 0)') === null &&
+          AP.cssColorToHex('rgba(20, 20, 20, 0.3)') === null &&
+          AP.cssColorToHex('') === null &&
+          AP.cssColorToHex('不是颜色') === null &&
+          AP.cssColorToHex(undefined) === null,
+      ]);
+
+      // (b) 深浅判定：信号有强弱，DSH 的标记 > color-scheme > 系统偏好 > 底色亮度
+      checks.push([
+        'body[data-ds-dark-theme] 存在 → 深色（DSH 自己打的标）',
+        AP.schemeFromSignals({ darkMarker: true, colorScheme: 'light' }) === 'dark',
+      ]);
+      checks.push([
+        'color-scheme=light → 浅色（用户切浅色主题就是这条）',
+        AP.schemeFromSignals({ darkMarker: false, colorScheme: 'light' }) === 'light',
+      ]);
+      checks.push([
+        'color-scheme=dark → 深色',
+        AP.schemeFromSignals({ colorScheme: 'dark' }) === 'dark',
+      ]);
+      checks.push([
+        '「light dark」这种组合值按出现的第一个认',
+        AP.schemeFromSignals({ colorScheme: 'light dark' }) === 'light' &&
+          AP.schemeFromSignals({ colorScheme: 'dark light' }) === 'dark',
+      ]);
+      checks.push([
+        '什么都没给时退回系统偏好',
+        AP.schemeFromSignals({ prefersDark: false }) === 'light' &&
+          AP.schemeFromSignals({ prefersDark: true }) === 'dark',
+      ]);
+      checks.push([
+        '连系统偏好都没有 → 按底色亮度反推（主题插件换深/浅底也认得出）',
+        AP.schemeFromSignals({ paper: '#F7F4EE' }) === 'light' &&
+          AP.schemeFromSignals({ paper: '#14120F' }) === 'dark',
+      ]);
+      checks.push(['全空 → 深色（DSH 默认就是深色）', AP.schemeFromSignals({}) === 'dark']);
+
+      // (c) 跟随主题：把宿主画布色接过来，且字色对比度仍然 ≥ 4.5:1
+      const hostCanvases = [
+        ['DSH 深色画布', '#14120F'],
+        ['DSH 浅色画布', '#F7F4EE'],
+        ['主题插件：蓝黑', '#1B2430'],
+        ['主题插件：淡黄', '#FFF6D6'],
+      ];
+      let allAuto = true;
+      for (const [label, canvas] of hostCanvases) {
+        const vars = AP.cssVarsForHost({ font: 'md', paper: 'auto' }, canvas);
+        const hasAll = AP.APPEARANCE_PROPS.every((p) => p in vars);
+        const ratio = AP.contrastRatio(vars['--vs-ink'], vars['--vs-paper']);
+        // 纸色应该比画布更亮一档（面板是压在画布上的纸），但不能变成别的色相
+        const lifted = AP.relativeLuminance(vars['--vs-paper']) > AP.relativeLuminance(canvas);
+        if (!hasAll || ratio < 4.5 || !lifted) {
+          console.log(`      ↑ 「${label}」${canvas}：变量齐=${hasAll} 对比度=${ratio.toFixed(2)} 提亮=${lifted}`);
+          allAuto = false;
+        }
+      }
+      checks.push([
+        `跟随主题时用宿主画布色算全套颜色（${hostCanvases.length} 种画布，字的对比度都 ≥ 4.5:1 且比画布亮一档）`,
+        allAuto,
+      ]);
+      const autoLight = AP.cssVarsForHost({ paper: 'auto' }, '#F7F4EE');
+      const autoDark = AP.cssVarsForHost({ paper: 'auto' }, '#14120F');
+      checks.push([
+        '浅色宿主 → 深色字 / 深色宿主 → 浅色字',
+        AP.relativeLuminance(autoLight['--vs-ink']) < 0.2 && AP.relativeLuminance(autoDark['--vs-ink']) > 0.6,
+      ]);
+      checks.push([
+        '跟随主题时 color-scheme 跟着宿主反（输入框/滚动条也跟着）',
+        autoLight['color-scheme'] === 'light' && autoDark['color-scheme'] === 'dark',
+      ]);
+      checks.push([
+        '拿不到宿主底色时（老环境/假 DOM）退回「只出字号」，交给静态配色',
+        (() => {
+          const vars = AP.cssVarsForHost({ font: 'lg', paper: 'auto' }, null);
+          return vars['--vs-fs'] === '1.15' && !('--vs-paper' in vars);
+        })(),
+      ]);
+      checks.push([
+        '用户自己选了颜色就不听宿主的（自定义优先）',
+        AP.cssVarsForHost({ paper: '#1C1A18' }, '#F7F4EE')['--vs-paper'] === '#1C1A18',
+      ]);
+
+      for (const [name, ok] of checks) {
+        if (!ok) console.log(`      ↑ 跟随主题：${name}`);
+      }
+      return checks.every(([, ok]) => ok);
     })(),
   ]);
 

@@ -10,8 +10,172 @@
 // 并写入 DP 模型 —— 静默污染学习记录。
 
 import { el, mount, clear, setText, focusSelf, prefersReducedMotion } from './dom.mjs';
+import { getCore } from './core-ref.mjs';
 import { renderProgress, renderVocab, renderSettings, renderWeeklyReport, heatmap, collectionLabel } from './pages.mjs';
 import { createEyeCandy } from './eye-candy.mjs';
+
+/**
+ * 把「外观」设置写成面板根节点上的 CSS 变量（字号倍率 + 自定义纸色）。
+ *
+ * 为什么必须逐个 removeProperty：用户把背景色调成自定义色以后，那些变量是
+ * **内联样式**，优先级高于 `.vs[data-theme]` 里的声明。切回「跟随主题」时
+ * 若只改 data-theme 而不清内联值，颜色会永远停在用户上次选的那一档。
+ *
+ * 「跟随主题」不是「什么都不写」：那样只会用面板自带的深/浅两套固定配色，
+ * 宿主换了个底色（主题插件）就跟不上了。现在把宿主真实底色读出来当纸色。
+ */
+function applyAppearance(root, appearance) {
+  const AP = getCore().appearance;
+  if (!AP || typeof AP.cssVarsFor !== 'function') return;
+  const vars = typeof AP.cssVarsForHost === 'function'
+    ? AP.cssVarsForHost(appearance, readHostPaper())
+    : AP.cssVarsFor(appearance);
+  for (const p of ['--vs-fs', 'color-scheme', ...AP.APPEARANCE_PROPS]) {
+    const v = Object.prototype.hasOwnProperty.call(vars, p) ? vars[p] : null;
+    setStyleVar(root, p, v);
+  }
+}
+
+/**
+ * 读宿主**真实渲染出来**的底色（rgb/rgba → #RRGGBB）。
+ *
+ * 先看 body，再看 html：DSH 把配色写在 documentElement 的 --dsw-* 上，
+ * body 背景通常是实色；拿不到就返回 null，让调用方退回静态配色。
+ * 全程 try/catch：demo-boot 那套假 DOM 没有 getComputedStyle。
+ */
+function readHostPaper() {
+  const AP = getCore().appearance;
+  if (!AP || typeof AP.cssColorToHex !== 'function') return null;
+  if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return null;
+  const nodes = [document.body, document.documentElement];
+  for (const node of nodes) {
+    if (!node) continue;
+    try {
+      const hex = AP.cssColorToHex(getComputedStyle(node).backgroundColor);
+      if (hex) return hex;
+    } catch {
+      /* 读不到就看下一个 */
+    }
+  }
+  return null;
+}
+
+/**
+ * 宿主现在是深色还是浅色。
+ *
+ * 为什么不能读 `documentElement.dataset.theme`：DSH 的主题运行时压根不写这个
+ * 属性（它写 `style.colorScheme` + `body[data-ds-dark-theme]`），于是那个判断
+ * 永远返回 undefined → 面板永远深色，「跟随主题」形同虚设。
+ * 判定逻辑本身在 core/appearance.mjs 的 schemeFromSignals()，这里只负责采信号。
+ */
+export function hostScheme() {
+  const AP = getCore().appearance;
+  if (!AP || typeof AP.schemeFromSignals !== 'function') return 'dark';
+  const signals = { darkMarker: false, colorScheme: '', datasetTheme: '', prefersDark: undefined, paper: null };
+  try {
+    if (typeof document !== 'undefined') {
+      const body = document.body;
+      const html = document.documentElement;
+      if (body && typeof body.hasAttribute === 'function') {
+        signals.darkMarker = body.hasAttribute('data-ds-dark-theme');
+      }
+      if (html) {
+        signals.colorScheme = (html.style && html.style.colorScheme) || '';
+        if (!signals.colorScheme && typeof getComputedStyle === 'function') {
+          try {
+            signals.colorScheme = getComputedStyle(html).colorScheme || '';
+          } catch {
+            /* 假 DOM */
+          }
+        }
+        // 老路径兜底：0.3.5 之前（以及演示页）是靠 data-theme 标深浅的
+        signals.datasetTheme = (html.dataset && html.dataset.theme) || (typeof html.getAttribute === 'function' ? html.getAttribute('data-theme') || '' : '');
+      }
+    }
+    if (typeof matchMedia === 'function') {
+      signals.prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+  } catch {
+    /* 任何一环读不到就靠后面的兜底 */
+  }
+  signals.paper = readHostPaper();
+  return AP.schemeFromSignals(signals);
+}
+
+/**
+ * 写一个 CSS 自定义属性（value=null 表示删掉）。
+ *
+ * 为什么要包一层：demo-boot 那套测试用的是手写的假 DOM，它的 style 只是个
+ * 普通对象、没有 setProperty —— 直接调会在「切到设置页」时抛错，把整条
+ * 启动链路带崩（测试报 TypeError: root.style.setProperty is not a function）。
+ * 真宿主里走标准 API，假 DOM 里退化成赋值，两边都不炸。
+ */
+function setStyleVar(node, prop, value) {
+  // ⚠️ 局部变量别叫 st：core.test.mjs 会扫 ui/*.mjs 里「st 后面跟属性」的写法，
+  // 把它当成「视图读了快照里不存在的字段」（实测报了 removeProperty / setProperty）。
+  // 这里也刻意不把这个写法原样写进注释 —— 注释同样在扫描范围内。
+  const style = node && node.style;
+  if (!style) return;
+  if (typeof style.setProperty === 'function') {
+    if (value === null) style.removeProperty(prop);
+    else style.setProperty(prop, value);
+    return;
+  }
+  if (value === null) delete style[prop];
+  else style[prop] = value;
+}
+
+/**
+ * 盯着宿主的主题变化，一变就把面板同步过去。返回一个「停止监听」的函数。
+ *
+ * 三种信号都要听，因为 DSH 换主题有三条路：
+ *   1. 设置页切「浅色/深色/跟随系统」→ theme-runtime 改 documentElement 的
+ *      style.colorScheme 并重铺 --dsw-* token（= html 的 style 属性变动）
+ *   2. 深色时 body 上会有 data-ds-dark-theme（= body 的属性变动）
+ *   3. 系统配色变了（宿主偏好是 system）→ matchMedia 的 change
+ * 没有这一段，用户切主题后面板会一直停在旧主题的颜色上，得关掉重开才更新。
+ *
+ * 只监听自身属性、不监听子树（subtree: false），所以面板自己写内联样式
+ * 不会反喂回来形成死循环。
+ *
+ * 放在 panel.mjs 而不是 demo 外壳里：**真插件（adapter/dsh/puppet.mjs）走的
+ * 是这条路径**，demo 外壳只是复用它。第一版只在 shell.mjs 里装了监听，
+ * 结果真宿主里切主题照样不更新。
+ */
+export function watchHostTheme(getPanel) {
+  const sync = () => {
+    const p = getPanel && getPanel();
+    if (p && typeof p.setTheme === 'function') p.setTheme(hostScheme());
+  };
+  const stops = [];
+  try {
+    const mo = new MutationObserver(sync);
+    const opts = { attributes: true, attributeFilter: ['style', 'class', 'data-ds-dark-theme', 'data-theme'] };
+    if (document.body) mo.observe(document.body, opts);
+    if (document.documentElement) mo.observe(document.documentElement, opts);
+    stops.push(() => mo.disconnect());
+  } catch {
+    /* 没有 MutationObserver（测试假 DOM）就靠下次 render 时现算 */
+  }
+  try {
+    const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    if (mq && typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', sync);
+      stops.push(() => mq.removeEventListener('change', sync));
+    }
+  } catch {
+    /* 同上 */
+  }
+  return () => {
+    for (const stop of stops) {
+      try {
+        stop();
+      } catch {
+        /* 忽略 */
+      }
+    }
+  };
+}
 
 const TABS = [
   ['today', '今日'],
@@ -145,7 +309,13 @@ export function createPanel(app, ctx = {}) {
     if (typeof injectVocabStudyCss === 'function') injectVocabStudyCss(undefined, root);
     const st = app.state;
     root.className = `vs vs-panel ${isDocked() ? 'docked' : 'floating'}`;
-    root.dataset.theme = ctx.theme || 'dark';
+    // 深浅跟着宿主实时走（getScheme 由 shell 提供，内部就是 hostScheme()）。
+    // 没有 getScheme 时退回创建时传进来的 ctx.theme（demo 老路径/测试假 DOM）。
+    ctx.theme = ctx.getScheme ? ctx.getScheme() : ctx.theme || 'dark';
+    root.dataset.theme = ctx.theme;
+    // 外观（字号/背景）跟着设置走：每次渲染都写一遍，改设置即时生效，
+    // 也不需要额外的 emit 通道 —— updateSettings 本来就会 emit。
+    applyAppearance(root, st.settings?.appearance);
 
     // 顶栏
     mount(
@@ -892,6 +1062,9 @@ export function createPanel(app, ctx = {}) {
     setTheme(t) {
       ctx.theme = t;
       root.dataset.theme = t;
+      // 宿主换主题时必须重算一次外观：选「跟随主题」时纸色是从宿主底色读出来的，
+      // 只改 data-theme 不重算，颜色会停在旧主题上（这正是用户报的那个 bug 的变体）。
+      applyAppearance(root, app.state.settings?.appearance);
     },
   };
 }
